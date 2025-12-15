@@ -22,6 +22,14 @@ data class TokenUsage(
     val output_tokens: Int? = null
 )
 
+// === User Location from browser geolocation ===
+@Serializable
+data class UserLocation(
+    val latitude: Double,
+    val longitude: Double,
+    val source: String = "browser_geolocation"
+)
+
 // === POST /api/chat ===
 @Serializable
 data class ChatRequest(
@@ -32,7 +40,8 @@ data class ChatRequest(
     val temperature: Double = 1.0,
     val spec_mode: Boolean = false,
     val conversation_history: List<Message> = emptyList(),
-    val enabled_tools: List<String> = emptyList()
+    val enabled_tools: List<String> = emptyList(),
+    val user_location: UserLocation? = null
 )
 
 @Serializable

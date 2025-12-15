@@ -38,6 +38,40 @@ import java.io.File
  * Настраивает сервер, роутинг, middleware и запускает приложение.
  */
 
+/**
+ * Разрешает путь к папке статических файлов.
+ * Ищет папку в нескольких возможных местах:
+ * 1. Относительно текущей рабочей директории
+ * 2. Относительно корня проекта (user.dir)
+ * 3. Относительно родительской директории (для запуска из app/)
+ *
+ * @param staticFolder Имя папки со статическими файлами (например, "ui")
+ * @param logger Логгер для отладочных сообщений
+ * @return File объект с найденной папкой или null, если не найдена
+ */
+private fun resolveStaticPath(staticFolder: String, logger: org.slf4j.Logger): File? {
+    val possiblePaths = listOf(
+        File(staticFolder),                                    // Относительно текущей директории
+        File(System.getProperty("user.dir"), staticFolder),    // Относительно user.dir
+        File(System.getProperty("user.dir"), "../$staticFolder"), // Родительская директория
+        File("app/../$staticFolder")                           // Из app/ в корень проекта
+    )
+
+    logger.debug("Поиск статических файлов '$staticFolder' в следующих местах:")
+    for (path in possiblePaths) {
+        logger.debug("  - ${path.absolutePath} (exists: ${path.exists()}, isDirectory: ${path.isDirectory})")
+        if (path.exists() && path.isDirectory) {
+            val indexFile = File(path, "index.html")
+            if (indexFile.exists()) {
+                logger.info("Найдена папка статических файлов: ${path.absolutePath}")
+                return path
+            }
+        }
+    }
+
+    return null
+}
+
 fun main() {
     // Инициализация базы данных
     DatabaseFactory.init()
@@ -126,8 +160,6 @@ fun Application.module() {
 
     // === Роутинг ===
     routing {
-        // API routes должны быть определены ПЕРВЫМИ, чтобы не перекрывались статическими файлами
-
         // Health check и tools
         healthRoutes(claudeClient)
 
@@ -137,37 +169,33 @@ fun Application.module() {
         // Session management
         sessionRoutes(repository)
 
-        // Статические файлы (UI) - в конце, чтобы не перекрывать API роуты
+        // Статические файлы (UI)
         val staticFolder = AppConfig.staticFolder
-        val staticPath = File(staticFolder)
+        val staticPath = resolveStaticPath(staticFolder, logger)
 
-        if (staticPath.exists() && staticPath.isDirectory) {
-            logger.info("Статические файлы доступны из: $staticFolder")
-
-            // Serve index.html for root path
-            get("/") {
-                val indexFile = File(staticPath, "index.html")
-                call.respondFile(indexFile)
+        if (staticPath != null && staticPath.exists() && staticPath.isDirectory) {
+            staticFiles("/", staticPath) {
+                default("index.html")
             }
-//            val windowState = rememberWindowState(width = 1200.dp, height = 800.dp)
-//
-//            Window(
-//                onCloseRequest = ::exitApplication,
-//                title = "Claude AI Chat",
-//                state = windowState
-//            ) {
-//                ClaudeChatApp()
-//            }
-
-            // Serve all other static files
-            static("/") {
-                files(staticPath)
-            }
+            logger.info("Статические файлы доступны из: ${staticPath.absolutePath}")
         } else {
             logger.warn("Папка статических файлов не найдена: $staticFolder")
+            logger.warn("Проверенные пути:")
+            logger.warn("  - ${File(staticFolder).absolutePath}")
+            logger.warn("  - ${File(System.getProperty("user.dir"), staticFolder).absolutePath}")
+        }
 
-            // Fallback если папка ui не найдена
-            get("/") {
+        // Fallback для корневого URL
+        get("/") {
+            val indexFile = if (staticPath != null) {
+                File(staticPath, "index.html")
+            } else {
+                File(staticFolder, "index.html")
+            }
+
+            if (indexFile.exists()) {
+                call.respondFile(indexFile)
+            } else {
                 call.respondText(
                     """
                     <!DOCTYPE html>
@@ -176,7 +204,6 @@ fun Application.module() {
                     <body>
                         <h1>KotlinAgent API</h1>
                         <p>Сервер работает!</p>
-                        <p style="color: red;">⚠️ Папка UI не найдена: $staticFolder</p>
                         <ul>
                             <li><a href="/health">GET /health</a> - Health check</li>
                             <li><a href="/api/tools">GET /api/tools</a> - MCP инструменты</li>

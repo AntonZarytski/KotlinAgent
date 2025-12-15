@@ -68,6 +68,11 @@ fun Route.chatRoutes(
             val clientIp = call.request.origin.remoteHost
             logger.info("IP клиента: $clientIp")
 
+            // Логируем информацию о геолокации
+            if (request.user_location != null) {
+                logger.info("Получена геолокация от браузера: lat=${request.user_location.latitude}, lon=${request.user_location.longitude}")
+            }
+
             // Отправляем запрос к Claude API
             val (reply, usage, error) = claudeClient.sendMessage(
                 userMessage = request.message,
@@ -77,7 +82,8 @@ fun Route.chatRoutes(
                 conversationHistory = conversationHistory,
                 temperature = temperature,
                 enabledTools = request.enabled_tools,
-                clientIp = clientIp
+                clientIp = clientIp,
+                userLocation = request.user_location
             )
 
             // Обработка ошибок

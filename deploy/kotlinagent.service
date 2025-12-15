@@ -1,15 +1,17 @@
 [Unit]
-Description=KotlinAgent Ktor Service
+Description=KotlinAgent
 After=network.target
 
 [Service]
 User=agent
 Group=agent
 WorkingDirectory=/home/agent/KotlinAgent
+EnvironmentFile=/home/agent/KotlinAgent/.env
+
 Environment=JAVA_OPTS="-Xmx512m"
 ExecStart=/usr/bin/java -jar /home/agent/KotlinAgent/app/build/libs/app.jar
 Restart=always
-RestartSec=10
+RestartSec=5
 
 # Логирование
 StandardOutput=journal

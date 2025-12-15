@@ -43,7 +43,7 @@ fun Route.healthRoutes(claudeClient: ClaudeClient) {
      */
     get("/api/tools") {
         try {
-            val toolDefinitions = MCPTools.getToolsDefinitions()
+            val toolDefinitions = MCPTools.getAllTools()
 
             val toolsList = toolDefinitions.map { tool ->
                 ToolInfo(

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Скрипт запуска KotlinAgent на VPS
+# Запуск KotlinAgent (ручной режим, без systemd)
 
 set -e
 
@@ -8,23 +8,23 @@ JAR_FILE="$APP_DIR/app/build/libs/app.jar"
 
 echo "=== Запуск KotlinAgent ==="
 
-# Переходим в директорию проекта
 cd "$APP_DIR"
 
-# Проверяем наличие JAR файла
 if [ ! -f "$JAR_FILE" ]; then
-    echo "Ошибка: JAR файл не найден: $JAR_FILE"
-    echo "Запустите сборку: ./gradlew :app:build"
+    echo "❌ JAR файл не найден: $JAR_FILE"
     exit 1
 fi
 
-# Проверяем .env
 if [ ! -f ".env" ]; then
-    echo "Ошибка: файл .env не найден!"
-    echo "Создайте .env на основе .env.example"
+    echo "❌ .env не найден"
     exit 1
 fi
 
-# Запускаем приложение
-echo "Запуск из JAR: $JAR_FILE"
-java -jar "$JAR_FILE"
+# Проверяем, не запущен ли уже
+if pgrep -f "$JAR_FILE" > /dev/null; then
+    echo "⚠️ KotlinAgent уже запущен — пропускаем старт"
+    exit 0
+fi
+
+echo "Запуск: $JAR_FILE"
+exec java -jar "$JAR_FILE"

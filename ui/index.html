@@ -1889,6 +1889,7 @@
 
     // Геолокация пользователя
     let userLocation = null;
+    let geolocationStatus = 'pending'; // 'pending', 'loading', 'success', 'error', 'denied'
 
     // Функция генерации уникального ID сессии
     function generateSessionId() {
@@ -1897,24 +1898,193 @@
       return `session_${timestamp}_${random}`;
     }
 
+    // Обновление индикатора статуса геолокации
+    function updateGeolocationIndicator(status, message = '') {
+      geolocationStatus = status;
+      const indicator = document.querySelector('.status-indicator');
+      if (!indicator) return;
+
+      switch (status) {
+        case 'loading':
+          indicator.textContent = '📍';
+          indicator.title = 'Определение местоположения...';
+          indicator.style.opacity = '0.6';
+          break;
+        case 'success':
+          indicator.textContent = '📍';
+          indicator.title = `Геолокация: ${userLocation.latitude.toFixed(4)}, ${userLocation.longitude.toFixed(4)}`;
+          indicator.style.opacity = '1';
+          indicator.style.color = '#10b981';
+          break;
+        case 'error':
+          indicator.textContent = '📍';
+          // Проверяем, является ли ошибка проблемой с безопасным контекстом
+          if (message.includes('secure origins') || message.includes('Only secure')) {
+            indicator.title = `⚠️ Геолокация доступна только через HTTPS или localhost.\n\nОткройте сайт через http://localhost:${window.location.port} вместо ${window.location.host}`;
+          } else {
+            indicator.title = `Ошибка геолокации: ${message}`;
+          }
+          indicator.style.opacity = '1';
+          indicator.style.color = '#ef4444';
+          break;
+        case 'denied':
+          indicator.textContent = '📍';
+          indicator.title = 'Доступ к геолокации запрещён.\nНажмите на иконку слева от адресной строки для изменения разрешений.';
+          indicator.style.opacity = '1';
+          indicator.style.color = '#f59e0b';
+          break;
+        default:
+          indicator.textContent = '';
+          indicator.title = '';
+      }
+    }
+
     // Запрос геолокации при загрузке страницы
     function requestGeolocation() {
-      if ('geolocation' in navigator) {
+      console.log('🔍 Проверка поддержки геолокации...');
+      console.log('navigator.geolocation:', navigator.geolocation);
+      console.log('window.isSecureContext:', window.isSecureContext);
+      console.log('window.location.protocol:', window.location.protocol);
+      console.log('window.location.href:', window.location.href);
+
+      if (!('geolocation' in navigator)) {
+        console.warn('⚠️ Geolocation API не поддерживается');
+        updateGeolocationIndicator('error', 'API не поддерживается');
+        return;
+      }
+
+      // Проверка безопасного контекста (HTTPS или localhost)
+      if (!window.isSecureContext && window.location.protocol !== 'file:') {
+        console.warn('⚠️ Геолокация доступна только через HTTPS или localhost');
+        console.warn('Текущий URL:', window.location.href);
+        const currentHost = window.location.host;
+        const port = window.location.port;
+        const localhostUrl = `http://localhost:${port}`;
+        updateGeolocationIndicator('error', `Only secure origins are allowed. Откройте ${localhostUrl} вместо ${currentHost}`);
+
+        // Показываем уведомление пользователю
+        console.info(`💡 Совет: Откройте сайт через ${localhostUrl} для доступа к геолокации`);
+        return;
+      }
+
+      updateGeolocationIndicator('loading');
+      console.log('📍 Запрос геолокации...');
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          geolocationStatus = 'success';
+          userLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy
+          };
+          console.log('✅ Геолокация получена:', userLocation);
+          updateGeolocationIndicator('success');
+        },
+        (error) => {
+          let errorMessage = error.message;
+          let status = 'error';
+
+          console.error('❌ Ошибка геолокации:', {
+            code: error.code,
+            message: error.message,
+            PERMISSION_DENIED: error.PERMISSION_DENIED,
+            POSITION_UNAVAILABLE: error.POSITION_UNAVAILABLE,
+            TIMEOUT: error.TIMEOUT
+          });
+
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = 'Пользователь запретил доступ к геолокации';
+              status = 'denied';
+              geolocationStatus = 'denied';
+              console.warn('⚠️ Доступ к геолокации запрещён');
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = 'Местоположение недоступно';
+              geolocationStatus = 'error';
+              console.warn('⚠️ Местоположение недоступно');
+              break;
+            case error.TIMEOUT:
+              errorMessage = 'Превышено время ожидания';
+              geolocationStatus = 'error';
+              console.warn('⚠️ Превышено время ожидания геолокации');
+              break;
+            default:
+              geolocationStatus = 'error';
+              console.warn('⚠️ Ошибка геолокации:', errorMessage);
+          }
+
+          updateGeolocationIndicator(status, errorMessage);
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 10000,
+          maximumAge: 300000 // Кэшируем на 5 минут
+        }
+      );
+    }
+
+    // Получение координат для запроса (с возможностью повторного запроса)
+    async function getCoordinatesForRequest() {
+      // Если координаты уже есть, возвращаем их
+      if (userLocation) {
+        return {
+          latitude: userLocation.latitude,
+          longitude: userLocation.longitude,
+          source: 'browser_geolocation'
+        };
+      }
+
+      // Если геолокация была запрещена или недоступна, возвращаем null
+      if (geolocationStatus === 'denied' || geolocationStatus === 'error') {
+        console.log('📍 Геолокация недоступна (статус: ' + geolocationStatus + '), координаты не будут отправлены');
+        return null;
+      }
+
+      // Пытаемся получить геолокацию ещё раз
+      return new Promise((resolve) => {
+        if (!('geolocation' in navigator)) {
+          resolve(null);
+          return;
+        }
+
+        updateGeolocationIndicator('loading');
         navigator.geolocation.getCurrentPosition(
           (position) => {
+            geolocationStatus = 'success';
             userLocation = {
               latitude: position.coords.latitude,
-              longitude: position.coords.longitude
+              longitude: position.coords.longitude,
+              accuracy: position.coords.accuracy
             };
-            console.log('📍 Геолокация получена:', userLocation);
+            updateGeolocationIndicator('success');
+            resolve({
+              latitude: userLocation.latitude,
+              longitude: userLocation.longitude,
+              source: 'browser_geolocation'
+            });
           },
           (error) => {
             console.warn('⚠️ Не удалось получить геолокацию:', error.message);
+
+            // Определяем статус ошибки
+            if (error.code === error.PERMISSION_DENIED) {
+              geolocationStatus = 'denied';
+            } else {
+              geolocationStatus = 'error';
+            }
+
+            updateGeolocationIndicator('error', error.message);
+            resolve(null);
+          },
+          {
+            enableHighAccuracy: false,
+            timeout: 5000,
+            maximumAge: 300000
           }
         );
-      } else {
-        console.warn('⚠️ Geolocation API не поддерживается');
-      }
+      });
     }
 
     // FIX: Флаг для отслеживания состояния клавиатуры
@@ -2549,16 +2719,6 @@
       let text = input.value.trim();
       if (!text) return;
 
-      // Если есть геолокация и сообщение про погоду без координат, добавляем их
-      if (userLocation && (
-        text.toLowerCase().includes('погод') ||
-        text.toLowerCase().includes('temperature') ||
-        text.toLowerCase().includes('weather')
-      ) && !text.match(/\d+\.\d+/)) {
-        text += ` (моя геолокация: ${userLocation.latitude.toFixed(4)}, ${userLocation.longitude.toFixed(4)})`;
-        console.log('📍 Добавлена геолокация в запрос');
-      }
-
       // Получаем текущие настройки
       const settings = getSettings();
       const sendHistory = sendHistoryCheckbox.checked;
@@ -2569,8 +2729,8 @@
       console.log('📊 Сообщений с момента последнего сжатия:', messageCountSinceCompression);
       console.log('🔑 Session ID:', currentSessionId);
 
-      // Добавляем сообщение пользователя (оригинальное без координат для отображения)
-      addMessage('user', input.value.trim());
+      // Добавляем сообщение пользователя
+      addMessage('user', text);
       input.value = '';
       input.style.height = 'auto';
 
@@ -2598,23 +2758,67 @@
           console.log('✨ Новая сессия создана:', currentSessionId);
         }
 
+        // Проверяем, нужна ли геолокация для этого запроса
+        const needsGeolocation = text.toLowerCase().includes('погод') ||
+                                 text.toLowerCase().includes('weather') ||
+                                 text.toLowerCase().includes('температур') ||
+                                 text.toLowerCase().includes('temperature') ||
+                                 text.toLowerCase().includes('солнечн') ||
+                                 text.toLowerCase().includes('solar') ||
+                                 text.toLowerCase().includes('аврор') ||
+                                 text.toLowerCase().includes('aurora') ||
+                                 text.toLowerCase().includes('сиян') ||
+                                 text.toLowerCase().includes('северн');
+
+        console.log('🔍 Проверка необходимости геолокации:', {
+          needsGeolocation,
+          text: text.substring(0, 50),
+          hasExplicitCoords: !!text.match(/\d+\.\d+/),
+          currentUserLocation: userLocation,
+          geolocationStatus
+        });
+
+        // Получаем координаты, если они нужны и не указаны явно в тексте
+        let coordinates = null;
+        if (needsGeolocation && !text.match(/\d+\.\d+/)) {
+          console.log('📍 Запрос координат для отправки...');
+          coordinates = await getCoordinatesForRequest();
+          if (coordinates) {
+            console.log('✅ Координаты будут отправлены с запросом:', coordinates);
+          } else {
+            console.log('⚠️ Координаты недоступны, сервер определит местоположение по IP');
+          }
+        } else if (!needsGeolocation) {
+          console.log('ℹ️ Геолокация не требуется для этого запроса');
+        } else {
+          console.log('ℹ️ Координаты указаны явно в тексте, автоматическая геолокация не используется');
+        }
+
         // Формируем историю для отправки
         // Если sendHistory выключен — отправляем пустой массив
         const historyToSend = sendHistory ? conversationHistory.slice(0, -1) : [];
 
+        // Формируем тело запроса
+        const requestBody = {
+          message: text,
+          session_id: currentSessionId,
+          output_format: settings.output_format,
+          max_tokens: settings.max_tokens,
+          spec_mode: settings.spec_mode,
+          temperature: settings.temperature,
+          conversation_history: historyToSend,
+          enabled_tools: enabledTools
+        };
+
+        // Добавляем координаты, если они есть
+        if (coordinates) {
+          requestBody.user_location = coordinates;
+        }
+
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            message: text,
-            session_id: currentSessionId,
-            output_format: settings.output_format,
-            max_tokens: settings.max_tokens,
-            spec_mode: settings.spec_mode,
-            temperature: settings.temperature,
-            conversation_history: historyToSend,
-            enabled_tools: enabledTools
-          })
+          body: JSON.stringify(requestBody)
         });
 
         const data = await response.json();

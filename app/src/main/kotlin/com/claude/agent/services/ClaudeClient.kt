@@ -39,6 +39,7 @@ class ClaudeClient(
      * Отправляет сообщение в Claude API и возвращает ответ.
      *
      * @param clientIp IP-адрес клиента для автоматического определения местоположения в MCP инструментах
+     * @param userLocation Координаты пользователя из браузера (если доступны)
      * @return Triple(reply, usage, error)
      */
     suspend fun sendMessage(
@@ -50,7 +51,8 @@ class ClaudeClient(
         conversationHistory: List<Message> = emptyList(),
         temperature: Double = 1.0,
         enabledTools: List<String> = emptyList(),
-        clientIp: String? = null
+        clientIp: String? = null,
+        userLocation: com.claude.agent.models.UserLocation? = null
     ): Triple<String?, TokenUsage?, String?> {
         try {
             // Формируем системный промпт
@@ -111,7 +113,8 @@ class ClaudeClient(
                 systemPrompt,
                 temperature,
                 tools,
-                clientIp
+                clientIp,
+                userLocation
             )
 
             logger.info("Ответ получен за ${elapsed}ms")
@@ -136,7 +139,8 @@ class ClaudeClient(
         systemPrompt: String,
         temperature: Double,
         tools: JsonArray?,
-        clientIp: String?
+        clientIp: String?,
+        userLocation: com.claude.agent.models.UserLocation?
     ): Pair<String, TokenUsage> {
         var currentResponse = responseBody
         val messages = initialMessages.toMutableList()
@@ -187,7 +191,7 @@ class ClaudeClient(
                     logger.info("Вызов инструмента: $toolName")
 
                     val result = try {
-                        mcpTools.callTool(toolName, toolInput, clientIp)
+                        mcpTools.callTool(toolName, toolInput, clientIp, userLocation)
                     } catch (e: Exception) {
                         logger.error("Ошибка выполнения $toolName: ${e.message}")
                         """{"error": "${e.message}"}"""
@@ -266,19 +270,7 @@ class ClaudeClient(
     }
 
     private fun getFilteredTools(enabledTools: List<String>): JsonArray? {
-        val allTools = MCPTools.getToolsDefinitions()
-
-        if (enabledTools.isEmpty()) {
-            // Возвращаем все
-            return JsonArray(allTools.map { tool ->
-                JsonObject(mapOf(
-                    "name" to JsonPrimitive(tool.name),
-                    "description" to JsonPrimitive(tool.description),
-                    "input_schema" to tool.input_schema
-                ))
-            })
-        }
-
+        val allTools = MCPTools.getToolsDefinitions(enabledTools)
         // Фильтруем
         val filtered = allTools.filter { it.name in enabledTools }
         return if (filtered.isNotEmpty()) {
