@@ -1,0 +1,128 @@
+package com.claude.agent.models
+
+import kotlinx.serialization.Serializable
+
+/**
+ * Data classes для API запросов и ответов.
+ *
+ * Аналог структур из Python App.py, но с типобезопасностью Kotlin.
+ */
+
+// === Сообщение в диалоге ===
+@Serializable
+data class Message(
+    val role: String,           // "user" или "assistant"
+    val content: String,
+    val usage: TokenUsage? = null
+)
+
+@Serializable
+data class TokenUsage(
+    val input_tokens: Int? = null,
+    val output_tokens: Int? = null
+)
+
+// === POST /api/chat ===
+@Serializable
+data class ChatRequest(
+    val message: String,
+    val session_id: String? = null,
+    val output_format: String = "default",
+    val max_tokens: Int = 1024,
+    val temperature: Double = 1.0,
+    val spec_mode: Boolean = false,
+    val conversation_history: List<Message> = emptyList(),
+    val enabled_tools: List<String> = emptyList()
+)
+
+@Serializable
+data class ChatResponse(
+    val reply: String,
+    val usage: TokenUsage? = null,
+    val compressed_history: List<Message>? = null,
+    val compression_applied: Boolean = false
+)
+
+@Serializable
+data class ErrorResponse(
+    val error: String
+)
+
+// === POST /api/count_tokens ===
+@Serializable
+data class CountTokensRequest(
+    val message: String,
+    val output_format: String = "default",
+    val spec_mode: Boolean = false,
+    val conversation_history: List<Message> = emptyList()
+)
+
+@Serializable
+data class CountTokensResponse(
+    val input_tokens: Int
+)
+
+// === GET /health ===
+@Serializable
+data class HealthResponse(
+    val status: String,
+    val timestamp: String,
+    val api_key_configured: Boolean
+)
+
+// === GET /api/tools ===
+@Serializable
+data class ToolInfo(
+    val name: String,
+    val description: String
+)
+
+@Serializable
+data class ToolsResponse(
+    val tools: List<ToolInfo>
+)
+
+// === Sessions API ===
+@Serializable
+data class SessionInfo(
+    val id: String,
+    val title: String,
+    val created_at: String,
+    val last_updated: String
+)
+
+@Serializable
+data class SessionsResponse(
+    val sessions: List<SessionInfo>
+)
+
+@Serializable
+data class SessionHistoryResponse(
+    val session_id: String,
+    val history: List<Message>,
+    val stats: SessionStats
+)
+
+@Serializable
+data class SessionStats(
+    val total_messages: Int,
+    val user_messages: Int,
+    val assistant_messages: Int
+)
+
+@Serializable
+data class CreateSessionRequest(
+    val session_id: String,
+    val title: String = "Новый диалог"
+)
+
+@Serializable
+data class CreateSessionResponse(
+    val session_id: String,
+    val title: String
+)
+
+@Serializable
+data class DeleteSessionResponse(
+    val message: String
+)

@@ -1,0 +1,20 @@
+[Unit]
+Description=KotlinAgent Ktor Service
+After=network.target
+
+[Service]
+User=agent
+Group=agent
+WorkingDirectory=/home/agent/KotlinAgent
+Environment=JAVA_OPTS="-Xmx512m"
+ExecStart=/usr/bin/java -jar /home/agent/KotlinAgent/app/build/libs/app.jar
+Restart=always
+RestartSec=10
+
+# Логирование
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kotlinagent
+
+[Install]
+WantedBy=multi-user.target
