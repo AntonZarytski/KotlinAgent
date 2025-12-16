@@ -10,7 +10,7 @@ REMOTE_DIR="/home/agent/KotlinAgent"
 LOCAL_DIR="/Users/anton/IdeaProjects/KotlinAgent"
 
 APP_JAR="app/build/libs/app.jar"
-APP_PORT="8000"
+APP_PORT="8001"
 
 echo "=== Деплой KotlinAgent ==="
 
