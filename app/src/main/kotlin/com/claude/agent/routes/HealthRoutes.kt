@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory
  *
  * Аналог эндпоинтов /health и /api/tools из App.py.
  */
-fun Route.healthRoutes(claudeClient: ClaudeClient) {
+fun Route.healthRoutes(claudeClient: ClaudeClient, mcpTools: MCPTools) {
     val logger = LoggerFactory.getLogger("HealthRoutes")
 
     /**
@@ -39,21 +39,34 @@ fun Route.healthRoutes(claudeClient: ClaudeClient) {
     }
 
     /**
-     * GET /api/tools - получить список доступных MCP инструментов.
+     * GET /api/tools - получить список доступных MCP инструментов (локальных и удаленных).
      */
     get("/api/tools") {
         try {
-            val toolDefinitions = MCPTools.getAllTools()
-
-            val toolsList = toolDefinitions.map { tool ->
+            // Получаем локальные инструменты
+            val localTools = mcpTools.getAllTools()
+            val localToolsList = localTools.map { tool ->
                 ToolInfo(
                     name = tool.name,
-                    description = tool.description
+                    description = tool.description,
+                    type = "local"
                 )
             }
 
-            logger.info("Возвращено ${toolsList.size} инструментов")
-            call.respond(HttpStatusCode.OK, ToolsResponse(toolsList))
+            // Получаем remote MCP серверы
+            val remoteServers = mcpTools.getAllRemoteServers()
+            val remoteToolsList = remoteServers.map { server ->
+                ToolInfo(
+                    name = server.name,
+                    description = server.description,
+                    type = "remote_mcp"
+                )
+            }
+
+            val allTools = localToolsList + remoteToolsList
+
+            logger.info("Возвращено ${allTools.size} инструментов (${localToolsList.size} локальных, ${remoteToolsList.size} remote MCP)")
+            call.respond(HttpStatusCode.OK, ToolsResponse(allTools))
 
         } catch (e: Exception) {
             logger.error("Ошибка получения списка инструментов: ${e.message}", e)

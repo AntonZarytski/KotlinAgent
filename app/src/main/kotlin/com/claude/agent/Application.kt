@@ -9,7 +9,9 @@ import com.claude.agent.routes.sessionRoutes
 import com.claude.agent.services.ClaudeClient
 import com.claude.agent.services.GeolocationService
 import com.claude.agent.services.HistoryCompressor
+import com.claude.agent.services.LocalMCPClient
 import com.claude.agent.services.MCPTools
+import com.claude.agent.services.RemoteMCPClient
 import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -109,10 +111,13 @@ fun Application.module() {
         }
     }
 
+    val remoteMcpClient = RemoteMCPClient()
+
+    val localMCPClient = LocalMCPClient(httpClient = httpClient)
+
     // === Инициализация сервисов ===
     val repository = ConversationRepository()
-    val geolocationService = GeolocationService(httpClient)
-    val mcpTools = MCPTools(httpClient, geolocationService)
+    val mcpTools = MCPTools(localMCP = localMCPClient, remoteMCP = remoteMcpClient)
     val claudeClient = ClaudeClient(httpClient, mcpTools)
     val historyCompressor = HistoryCompressor(claudeClient)
 
@@ -161,7 +166,7 @@ fun Application.module() {
     // === Роутинг ===
     routing {
         // Health check и tools
-        healthRoutes(claudeClient)
+        healthRoutes(claudeClient, mcpTools)
 
         // Chat endpoints
         chatRoutes(claudeClient, historyCompressor, repository)

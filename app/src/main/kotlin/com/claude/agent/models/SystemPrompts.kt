@@ -115,11 +115,12 @@ object SystemPrompts {
                 when (toolName) {
                     "get_weather_forecast" -> toolsPrompt += "\n-get_weather_forecast(lat, lon) - текущая погода"
                     "get_solar_activity" -> toolsPrompt += "\n- get_solar_activity(lat, lon) - солнечная активность, полярные сияния"
+                    "kiwi-com-flight-search" -> toolsPrompt += "\n- kiwi-com-flight-search remote MCP - Позволяет быстро подобрать лучшие варианты перелётов с учётом маршрута, дат (включая гибкость ±3 дня), типа поездки, количества пассажиров и класса обслуживания."
                 }
             }
             toolsPrompt += """
             Правила:
-            - Используй инструменты для актуальных данных о погоде/солнце
+            - Используй инструменты для актуальных данных о погоде/солнце/авиабилетах
             - Не придумывай данные — только через инструменты
             - Если нет координат — попроси город
             """

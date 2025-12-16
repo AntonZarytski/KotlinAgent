@@ -83,7 +83,8 @@ data class HealthResponse(
 @Serializable
 data class ToolInfo(
     val name: String,
-    val description: String
+    val description: String,
+    val type: String = "local" // "local" или "remote_mcp"
 )
 
 @Serializable

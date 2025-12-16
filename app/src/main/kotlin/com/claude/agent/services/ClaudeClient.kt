@@ -12,10 +12,13 @@ import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
-import kotlin.math.min
+import kotlinx.serialization.json.add
 
 /**
  * Клиент для работы с Claude API (Anthropic).
@@ -34,6 +37,8 @@ class ClaudeClient(
     companion object {
         private const val MAX_TOOL_ITERATIONS = 5
     }
+
+    val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
 
     /**
      * Отправляет сообщение в Claude API и возвращает ответ.
@@ -62,8 +67,11 @@ class ClaudeClient(
             // Формируем массив сообщений с историей
             val messages = buildMessages(conversationHistory, cleanUserMessage)
 
-            // Получаем инструменты (если нужны)
-            val tools = getFilteredTools(enabledTools)
+            // Получаем remote MCP серверы
+            val remoteMcp = mcpTools.getRemoteMCP()
+
+            // Получаем инструменты (включая remote MCP toolsets)
+            val tools = getFilteredTools(enabledTools, remoteMcp)
 
             // Формируем запрос
             val requestBody = buildAnthropicRequest(
@@ -73,6 +81,7 @@ class ClaudeClient(
                 messages = messages,
                 temperature = temperature,
                 tools = tools,
+                remoteMcp = remoteMcp,
                 specMode = specMode
             )
 
@@ -91,6 +100,10 @@ class ClaudeClient(
             val response: HttpResponse = httpClient.post(apiUrl) {
                 header("x-api-key", apiKey)
                 header("anthropic-version", "2023-06-01")
+                // Добавляем beta header для поддержки MCP connector
+                if (remoteMcp.isNotEmpty()) {
+                    header("anthropic-beta", "mcp-client-2025-11-20")
+                }
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }
@@ -113,6 +126,7 @@ class ClaudeClient(
                 systemPrompt,
                 temperature,
                 tools,
+                remoteMcp,
                 clientIp,
                 userLocation
             )
@@ -139,6 +153,7 @@ class ClaudeClient(
         systemPrompt: String,
         temperature: Double,
         tools: JsonArray?,
+        remoteMcp: JsonArray,
         clientIp: String?,
         userLocation: com.claude.agent.models.UserLocation?
     ): Pair<String, TokenUsage> {
@@ -219,12 +234,17 @@ class ClaudeClient(
                 messages = messages,
                 temperature = temperature,
                 tools = tools,
+                remoteMcp = remoteMcp,
                 specMode = false
             )
 
             val response: HttpResponse = httpClient.post(apiUrl) {
                 header("x-api-key", apiKey)
                 header("anthropic-version", "2023-06-01")
+                // Добавляем beta header для поддержки MCP connector
+                if (remoteMcp.isNotEmpty()) {
+                    header("anthropic-beta", "mcp-client-2025-11-20")
+                }
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }
@@ -269,19 +289,36 @@ class ClaudeClient(
         return messages
     }
 
-    private fun getFilteredTools(enabledTools: List<String>): JsonArray? {
-        val allTools = MCPTools.getToolsDefinitions(enabledTools)
-        // Фильтруем
+    private fun getFilteredTools(enabledTools: List<String>, remoteMcp: JsonArray): JsonArray? {
+        val allTools = mcpTools.getToolsDefinitions(enabledTools)
         val filtered = allTools.filter { it.name in enabledTools }
-        return if (filtered.isNotEmpty()) {
-            JsonArray(filtered.map { tool ->
-                JsonObject(mapOf(
+
+        val elements = buildList {
+            // Если есть remote MCP серверы, добавляем mcp_toolset для каждого
+            if (remoteMcp.isNotEmpty()) {
+                remoteMcp.forEach { serverElement ->
+                    val serverObj = serverElement.jsonObject
+                    val serverName = serverObj["name"]?.jsonPrimitive?.content
+                    if (serverName != null) {
+                        add(JsonObject(mapOf(
+                            "type" to JsonPrimitive("mcp_toolset"),
+                            "mcp_server_name" to JsonPrimitive(serverName)
+                        )))
+                    }
+                }
+            }
+
+            // Добавляем локальные инструменты (если есть)
+            filtered.forEach { tool ->
+                add(JsonObject(mapOf(
                     "name" to JsonPrimitive(tool.name),
                     "description" to JsonPrimitive(tool.description),
                     "input_schema" to tool.input_schema
-                ))
-            })
-        } else null
+                )))
+            }
+        }
+
+        return if (elements.isNotEmpty()) JsonArray(elements) else null
     }
 
     private fun buildAnthropicRequest(
@@ -290,16 +327,21 @@ class ClaudeClient(
         systemPrompt: String,
         messages: List<JsonObject>,
         temperature: Double,
+        remoteMcp: JsonArray,
         tools: JsonArray?,
         specMode: Boolean
     ): JsonObject {
-        val params = mutableMapOf<String, JsonElement>(
+        val params = mutableMapOf(
             "model" to JsonPrimitive(model),
             "max_tokens" to JsonPrimitive(maxTokens),
             "system" to JsonPrimitive(systemPrompt),
             "messages" to JsonArray(messages),
-            "temperature" to JsonPrimitive(temperature)
+            "temperature" to JsonPrimitive(temperature),
         )
+
+        if (remoteMcp.isNotEmpty()) {
+            params["mcp_servers"] = remoteMcp
+        }
 
         if (tools != null) {
             params["tools"] = tools

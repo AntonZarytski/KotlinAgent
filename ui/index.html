@@ -2281,27 +2281,72 @@
                 return;
             }
 
-            // Если enabledTools пусто, включаем все инструменты по умолчанию
+            // Разделяем локальные инструменты и remote MCP серверы
+            const localTools = tools.filter(t => t.type === 'local');
+            const remoteServers = tools.filter(t => t.type === 'remote_mcp');
+
+            // Если enabledTools пусто, включаем только локальные инструменты по умолчанию
             if (enabledTools.length === 0) {
-                enabledTools = tools.map(t => t.name);
+                enabledTools = localTools.map(t => t.name);
             }
 
-            toolsList.innerHTML = tools.map(tool => `
-                <label class="checkbox-container" style="cursor: pointer;">
-                    <input
-                        type="checkbox"
-                        value="${escapeHtml(tool.name)}"
-                        ${enabledTools.includes(tool.name) ? 'checked' : ''}
-                        onchange="toggleTool('${escapeHtml(tool.name)}', this.checked)"
-                    >
-                    <div>
-                        <div class="checkbox-label">${escapeHtml(tool.name)}</div>
-                        <div class="checkbox-desc">${escapeHtml(tool.description)}</div>
-                    </div>
-                </label>
-            `).join('');
+            let html = '';
 
-            console.log(`🔧 Загружено ${tools.length} инструментов`);
+            // Локальные инструменты
+            if (localTools.length > 0) {
+                html += `
+                    <div style="margin-bottom: 16px;">
+                        <div style="font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 8px; padding-left: 4px;">
+                            🔧 Локальные инструменты
+                        </div>
+                        ${localTools.map(tool => `
+                            <label class="checkbox-container" style="cursor: pointer;">
+                                <input
+                                    type="checkbox"
+                                    value="${escapeHtml(tool.name)}"
+                                    ${enabledTools.includes(tool.name) ? 'checked' : ''}
+                                    onchange="toggleTool('${escapeHtml(tool.name)}', this.checked)"
+                                >
+                                <div>
+                                    <div class="checkbox-label">${escapeHtml(tool.name)}</div>
+                                    <div class="checkbox-desc">${escapeHtml(tool.description)}</div>
+                                </div>
+                            </label>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            // Remote MCP серверы
+            if (remoteServers.length > 0) {
+                html += `
+                    <div style="margin-bottom: 16px;">
+                        <div style="font-size: 13px; font-weight: 600; color: #6b7280; margin-bottom: 8px; padding-left: 4px;">
+                            🌐 Remote MCP серверы
+                        </div>
+                        ${remoteServers.map(server => `
+                            <label class="checkbox-container" style="cursor: pointer; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-color: #bae6fd;">
+                                <input
+                                    type="checkbox"
+                                    value="${escapeHtml(server.name)}"
+                                    ${enabledTools.includes(server.name) ? 'checked' : ''}
+                                    onchange="toggleTool('${escapeHtml(server.name)}', this.checked)"
+                                >
+                                <div>
+                                    <div class="checkbox-label">
+                                        🌐 ${escapeHtml(server.name)}
+                                    </div>
+                                    <div class="checkbox-desc">${escapeHtml(server.description)}</div>
+                                </div>
+                            </label>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            toolsList.innerHTML = html;
+
+            console.log(`🔧 Загружено ${tools.length} инструментов (${localTools.length} локальных, ${remoteServers.length} remote MCP)`);
         } catch (error) {
             console.error('Ошибка загрузки инструментов:', error);
             toolsList.innerHTML = `
