@@ -57,7 +57,8 @@ class ClaudeClient(
         temperature: Double = 1.0,
         enabledTools: List<String> = emptyList(),
         clientIp: String? = null,
-        userLocation: com.claude.agent.models.UserLocation? = null
+        userLocation: com.claude.agent.models.UserLocation? = null,
+        sessionId: String? = null
     ): Triple<String?, TokenUsage?, String?> {
         try {
             // Формируем системный промпт
@@ -128,7 +129,8 @@ class ClaudeClient(
                 tools,
                 remoteMcp,
                 clientIp,
-                userLocation
+                userLocation,
+                sessionId
             )
 
             logger.info("Ответ получен за ${elapsed}ms")
@@ -155,7 +157,8 @@ class ClaudeClient(
         tools: JsonArray?,
         remoteMcp: JsonArray,
         clientIp: String?,
-        userLocation: com.claude.agent.models.UserLocation?
+        userLocation: com.claude.agent.models.UserLocation?,
+        sessionId: String?
     ): Pair<String, TokenUsage> {
         var currentResponse = responseBody
         val messages = initialMessages.toMutableList()
@@ -206,7 +209,7 @@ class ClaudeClient(
                     logger.info("Вызов инструмента: $toolName")
 
                     val result = try {
-                        mcpTools.callTool(toolName, toolInput, clientIp, userLocation)
+                        mcpTools.callTool(toolName, toolInput, clientIp, userLocation, sessionId)
                     } catch (e: Exception) {
                         logger.error("Ошибка выполнения $toolName: ${e.message}")
                         """{"error": "${e.message}"}"""

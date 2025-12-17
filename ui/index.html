@@ -117,7 +117,8 @@
 
         .header-buttons .tokens-btn,
         .header-buttons .settings-btn,
-        .header-buttons .history-btn {
+        .header-buttons .history-btn,
+        .header-buttons .reminder-btn {
           width: 40px;
           height: 40px;
           padding: 0;
@@ -136,7 +137,8 @@
 
         .header-buttons .tokens-btn:hover,
         .header-buttons .settings-btn:hover,
-        .header-buttons .history-btn:hover {
+        .header-buttons .history-btn:hover,
+        .header-buttons .reminder-btn:hover {
           transform: translateY(-2px);
           box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
         }
@@ -230,6 +232,25 @@
           flex-direction: row-reverse;
         }
 
+        .message-container {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          flex: 1;
+        }
+
+        .message-timestamp {
+          font-size: 11px;
+          color: #9ca3af;
+          opacity: 0.7;
+          align-self: flex-end;
+          margin-top: 2px;
+        }
+
+        .message-wrapper.user .message-timestamp {
+          align-self: flex-start;
+        }
+
         .avatar {
           width: 40px;
           height: 40px;
@@ -286,6 +307,10 @@
             box-shadow: 0 -8px 24px rgba(0,0,0,0.08);
             transform: translateZ(0); /* FIX: Аппаратное ускорение */
             backface-visibility: hidden; /* FIX: Предотвращение артефактов */
+        }
+
+        .message-wrapper.user .message-container {
+          align-items: flex-end;
         }
 
         .input-row {
@@ -641,6 +666,29 @@
           height: 100vh; /* ensure it occupies full height when opened */
         }
 
+        .reminder-panel {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: auto;
+          width: 0;
+          height: 100vh;
+          overflow: hidden;
+          background: white;
+          box-shadow: 5px 0 20px rgba(0, 0, 0, 0.1);
+          transition: width 0.3s ease;
+          display: flex;
+          flex-direction: column;
+          border-right: 1px solid rgba(0, 0, 0, 0.08);
+          flex-shrink: 0;
+          z-index: 9998;
+        }
+
+        .reminder-panel.active {
+          width: 320px;
+          height: 100vh;
+        }
+
         /* История чатов - специфичные стили */
         .history-list {
           flex: 1;
@@ -686,6 +734,24 @@
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .unread-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 20px;
+          height: 20px;
+          padding: 0 6px;
+          background: #ef4444;
+          color: white;
+          font-size: 11px;
+          font-weight: 600;
+          border-radius: 10px;
+          flex-shrink: 0;
         }
 
         .history-item-date {
@@ -740,6 +806,114 @@
         }
 
         .empty-history-icon {
+          font-size: 48px;
+          margin-bottom: 16px;
+        }
+
+        /* Reminder panel styles */
+        .reminder-list {
+          flex: 1;
+          overflow-y: auto;
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .reminder-item {
+          padding: 16px;
+          background: linear-gradient(135deg, #f9fafb 0%, #ffffff 100%);
+          border-radius: 12px;
+          border: 2px solid #e5e7eb;
+          transition: all 0.2s;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .reminder-item:hover {
+          border-color: #8b5cf6;
+          box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15);
+        }
+
+        .reminder-item.overdue {
+          border-color: #fca5a5;
+          background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%);
+        }
+
+        .reminder-item.overdue:hover {
+          border-color: #ef4444;
+          box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
+        }
+
+        .reminder-content {
+          flex: 1;
+        }
+
+        .reminder-text {
+          font-size: 14px;
+          font-weight: 500;
+          color: #374151;
+          margin-bottom: 8px;
+          line-height: 1.4;
+        }
+
+        .recurrence-badge {
+          display: inline-block;
+          margin-left: 8px;
+          padding: 2px 8px;
+          font-size: 11px;
+          font-weight: 600;
+          color: #059669;
+          background-color: #d1fae5;
+          border-radius: 12px;
+          vertical-align: middle;
+        }
+
+        .reminder-countdown {
+          font-size: 13px;
+          color: #6366f1;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .reminder-countdown::before {
+          content: '⏰';
+          font-size: 16px;
+        }
+
+        .reminder-dismiss-btn {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          border: none;
+          background: #f3f4f6;
+          color: #6b7280;
+          font-size: 18px;
+          cursor: pointer;
+          transition: all 0.2s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+
+        .reminder-dismiss-btn:hover {
+          background: #ef4444;
+          color: white;
+          transform: scale(1.1);
+        }
+
+        .empty-reminders {
+          padding: 40px 20px;
+          text-align: center;
+          color: #9ca3af;
+        }
+
+        .empty-reminders-icon {
           font-size: 48px;
           margin-bottom: 16px;
         }
@@ -1685,6 +1859,9 @@
                 <button type="button" class="history-btn" onclick="toggleHistory()" id="historyBtn"
                         aria-label="История чатов" title="История чатов">💬
                 </button>
+                <button type="button" class="reminder-btn" onclick="toggleReminders()" id="reminderBtn"
+                        aria-label="Напоминания" title="Напоминания">🔔
+                </button>
             </div>
             <div class="header-buttons right">
                 <button type="button" class="tokens-btn" onclick="checkTokens()" id="checkTokensBtn"
@@ -1803,7 +1980,8 @@
                         Загрузка инструментов...
                     </div>
                 </div>
-                <p class="setting-hint">Выберите инструменты, которые Claude сможет использовать для получения данных</p>
+                <p class="setting-hint">Выберите инструменты, которые Claude сможет использовать для получения
+                    данных</p>
             </div>
 
             <!-- Кнопка очистки истории -->
@@ -1827,6 +2005,20 @@
         <div class="empty-history">
             <div class="empty-history-icon">💬</div>
             <div>Нет сохраненных чатов</div>
+        </div>
+    </div>
+</div>
+
+<!-- Reminder Panel -->
+<div class="reminder-panel" id="reminderPanel">
+    <div class="settings-header">
+        <h2>🔔 Напоминания</h2>
+        <button class="close-btn" onclick="closeReminders()">×</button>
+    </div>
+    <div class="reminder-list" id="reminderList">
+        <div class="empty-reminders">
+            <div class="empty-reminders-icon">🔔</div>
+            <div>Нет активных напоминаний</div>
         </div>
     </div>
 </div>
@@ -1891,11 +2083,92 @@
     let userLocation = null;
     let geolocationStatus = 'pending'; // 'pending', 'loading', 'success', 'error', 'denied'
 
+    // WebSocket connection
+    let ws = null;
+
     // Функция генерации уникального ID сессии
     function generateSessionId() {
       const timestamp = new Date().getTime();
       const random = Math.random().toString(36).substring(2, 15);
       return `session_${timestamp}_${random}`;
+    }
+
+    // WebSocket functions
+    function connectWebSocket(sessionId) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log('WebSocket already connected');
+        return;
+      }
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/${sessionId}`;
+
+      console.log('Connecting to WebSocket:', wsUrl);
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log('WebSocket connected for session:', sessionId);
+      };
+
+      ws.onmessage = (event) => {
+        console.log('WebSocket message received:', event.data);
+        try {
+          const message = JSON.parse(event.data);
+          handleWebSocketMessage(message);
+        } catch (e) {
+          console.error('Error parsing WebSocket message:', e);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        // Reconnect after 3 seconds
+        setTimeout(() => {
+          if (currentSessionId) {
+            connectWebSocket(currentSessionId);
+          }
+        }, 3000);
+      };
+    }
+
+    function handleWebSocketMessage(message) {
+      console.log('Handling WebSocket message:', message);
+
+      if (message.type === 'connected') {
+        console.log('WebSocket connection confirmed');
+        return;
+      }
+
+      if (message.type === 'new_message') {
+        // Parse the message data
+        const messageData = JSON.parse(message.data);
+        console.log('New message received:', messageData);
+
+        // Add message to chat (addToHistory=false because it's already in DB)
+        addMessage(messageData.role, messageData.content, false, messageData.timestamp);
+
+        // Show browser notification for reminders
+        if (messageData.content.includes('🔔')) {
+          showBrowserNotification('Напоминание', messageData.content);
+        }
+
+        // Reload reminders list
+        loadReminders();
+
+        // Update sessions list to refresh unread counts
+        loadSessionsList();
+      }
+    }
+
+    function disconnectWebSocket() {
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
     }
 
     // Обновление индикатора статуса геолокации
@@ -2287,7 +2560,7 @@
 
             // Если enabledTools пусто, включаем только локальные инструменты по умолчанию
             if (enabledTools.length === 0) {
-                enabledTools = localTools.map(t => t.name);
+                let enabledTools = [];
             }
 
             let html = '';
@@ -2304,7 +2577,6 @@
                                 <input
                                     type="checkbox"
                                     value="${escapeHtml(tool.name)}"
-                                    ${enabledTools.includes(tool.name) ? 'checked' : ''}
                                     onchange="toggleTool('${escapeHtml(tool.name)}', this.checked)"
                                 >
                                 <div>
@@ -2398,11 +2670,260 @@
         historyPanel.classList.remove('active');
     }
 
+    async function toggleReminders() {
+        const reminderPanel = document.getElementById('reminderPanel');
+        const settingsPanel = document.getElementById('settingsPanel');
+        const historyPanel = document.getElementById('historyPanel');
+        const isActive = reminderPanel.classList.contains('active');
+
+        // Закрываем другие панели если открыты
+        if (settingsPanel.classList.contains('active')) {
+            closeSettings();
+        }
+        if (historyPanel.classList.contains('active')) {
+            closeHistory();
+        }
+
+        if (isActive) {
+            reminderPanel.classList.remove('active');
+        } else {
+            reminderPanel.classList.add('active');
+            // Загружаем напоминания
+            await loadReminders();
+        }
+    }
+
+    function closeReminders() {
+        const reminderPanel = document.getElementById('reminderPanel');
+        reminderPanel.classList.remove('active');
+    }
+
+    // Track notified reminders to avoid duplicate notifications
+    let notifiedReminders = new Set();
+
+    async function loadReminders() {
+        try {
+            const response = await fetch('/api/reminders');
+            const data = await response.json();
+            const reminders = data.reminders || [];
+
+            const reminderList = document.getElementById('reminderList');
+
+            if (reminders.length === 0) {
+                reminderList.innerHTML = `
+                    <div class="empty-reminders">
+                        <div class="empty-reminders-icon">🔔</div>
+                        <div>Нет активных напоминаний</div>
+                    </div>
+                `;
+                return;
+            }
+
+            // Check for due reminders and send notifications
+            const now = new Date();
+            reminders.forEach(reminder => {
+                const dueDate = new Date(reminder.due_at);
+                const timeLeft = dueDate - now;
+
+                // If reminder is due and we haven't notified yet
+                if (timeLeft <= 0 && !notifiedReminders.has(reminder.id)) {
+                    sendBrowserNotification(reminder);
+                    notifiedReminders.add(reminder.id);
+                }
+            });
+
+            // Отображаем напоминания с таймерами обратного отсчета
+            reminderList.innerHTML = reminders.map(reminder => {
+                const dueDate = new Date(reminder.due_at);
+                const now = new Date();
+                const timeLeft = dueDate - now;
+
+                let countdownText = '';
+                let overdueClass = '';
+                if (timeLeft < 0) {
+                    countdownText = 'Выполнено';
+                    overdueClass = 'overdue';
+                } else {
+                    countdownText = formatTimeLeft(timeLeft);
+                }
+
+                // Determine recurrence label
+                let recurrenceLabel = '';
+                if (reminder.recurrenceType && reminder.recurrenceType !== 'none') {
+                    const typeLabels = {
+                        'minutely': 'минуту',
+                        'hourly': 'час',
+                        'daily': 'день',
+                        'weekly': 'неделю',
+                        'monthly': 'месяц'
+                    };
+                    const interval = reminder.recurrenceInterval || 1;
+                    const typeLabel = typeLabels[reminder.recurrenceType] || reminder.recurrenceType;
+                    recurrenceLabel = interval === 1
+                        ? `🔁 Каждую ${typeLabel}`
+                        : `🔁 Каждые ${interval} ${typeLabel}`;
+                }
+
+                return `
+                    <div class="reminder-item ${overdueClass}" data-reminder-id="${reminder.id}" data-due-at="${reminder.due_at}">
+                        <div class="reminder-content">
+                            <div class="reminder-text">
+                                ${escapeHtml(reminder.text)}
+                                ${recurrenceLabel ? `<span class="recurrence-badge" title="Повторяющееся напоминание">${recurrenceLabel}</span>` : ''}
+                            </div>
+                            <div class="reminder-countdown" data-countdown="${reminder.id}">
+                                ${countdownText}
+                            </div>
+                        </div>
+                        <button class="reminder-dismiss-btn" onclick="dismissReminder('${reminder.id}')" title="Удалить">
+                            ✕
+                        </button>
+                    </div>
+                `;
+            }).join('');
+
+            // Запускаем обновление таймеров
+            startCountdownTimers();
+
+            console.log(`🔔 Загружено ${reminders.length} напоминаний`);
+        } catch (error) {
+            console.error('Ошибка загрузки напоминаний:', error);
+            const reminderList = document.getElementById('reminderList');
+            reminderList.innerHTML = `
+                <div class="empty-reminders">
+                    <div class="empty-reminders-icon">❌</div>
+                    <div>Ошибка загрузки</div>
+                </div>
+            `;
+        }
+    }
+
+    function formatTimeLeft(milliseconds) {
+        const seconds = Math.floor(milliseconds / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const days = Math.floor(hours / 24);
+
+        if (days > 0) {
+            return `${days} дн. ${hours % 24} ч.`;
+        } else if (hours > 0) {
+            return `${hours} ч. ${minutes % 60} мин.`;
+        } else if (minutes > 0) {
+            return `${minutes} мин. ${seconds % 60} сек.`;
+        } else {
+            return `${seconds} сек.`;
+        }
+    }
+
+    // Request notification permission on page load
+    async function requestNotificationPermission() {
+        if ('Notification' in window && Notification.permission === 'default') {
+            try {
+                const permission = await Notification.requestPermission();
+                console.log('Notification permission:', permission);
+            } catch (error) {
+                console.error('Error requesting notification permission:', error);
+            }
+        }
+    }
+
+    // Send browser notification for a reminder
+    function sendBrowserNotification(reminder) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            try {
+                const notification = new Notification('🔔 Напоминание', {
+                    body: reminder.text,
+                    icon: '/favicon.ico',
+                    badge: '/favicon.ico',
+                    tag: reminder.id,
+                    requireInteraction: true,
+                    vibrate: [200, 100, 200]
+                });
+
+                notification.onclick = function() {
+                    window.focus();
+                    // Open reminder panel
+                    const reminderPanel = document.getElementById('reminderPanel');
+                    if (!reminderPanel.classList.contains('active')) {
+                        toggleReminders();
+                    }
+                    notification.close();
+                };
+
+                console.log('Browser notification sent for reminder:', reminder.id);
+            } catch (error) {
+                console.error('Error sending browser notification:', error);
+            }
+        }
+    }
+
+    // Dismiss a reminder
+    async function dismissReminder(reminderId) {
+        try {
+            const response = await fetch(`/api/reminders/${reminderId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                console.log('Reminder dismissed:', reminderId);
+                // Remove from notified set
+                notifiedReminders.delete(reminderId);
+                // Reload reminders
+                await loadReminders();
+            } else {
+                console.error('Failed to dismiss reminder:', response.statusText);
+                alert('Не удалось удалить напоминание');
+            }
+        } catch (error) {
+            console.error('Error dismissing reminder:', error);
+            alert('Ошибка при удалении напоминания');
+        }
+    }
+
+    let countdownInterval = null;
+
+    function startCountdownTimers() {
+        // Очищаем предыдущий интервал если есть
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+        }
+
+        // Обновляем таймеры каждую секунду
+        countdownInterval = setInterval(() => {
+            const reminderItems = document.querySelectorAll('.reminder-item');
+
+            reminderItems.forEach(item => {
+                const dueAt = item.getAttribute('data-due-at');
+                const reminderId = item.getAttribute('data-reminder-id');
+                const countdownElement = item.querySelector(`[data-countdown="${reminderId}"]`);
+
+                if (dueAt && countdownElement) {
+                    const dueDate = new Date(dueAt);
+                    const now = new Date();
+                    const timeLeft = dueDate - now;
+
+                    if (timeLeft < 0) {
+                        countdownElement.textContent = 'Выполнено';
+                        countdownElement.style.color = '#dc2626';
+                    } else {
+                        countdownElement.textContent = formatTimeLeft(timeLeft);
+                    }
+                }
+            });
+        }, 1000);
+    }
+
     async function loadSessionsList() {
         try {
+            // Загружаем список сессий
             const response = await fetch('/api/sessions');
             const data = await response.json();
             const sessions = data.sessions || [];
+
+            // Загружаем счетчики непрочитанных сообщений
+            const unreadResponse = await fetch('/api/sessions/unread_counts');
+            const unreadData = await unreadResponse.json();
+            const unreadCounts = unreadData.unread_counts || {};
 
             const historyList = document.getElementById('historyList');
 
@@ -2423,11 +2944,16 @@
                 const date = new Date(session.last_updated);
                 const dateStr = date.toLocaleDateString('ru-RU') + ' ' + date.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
                 const isActive = session.id === currentSessionId ? 'active' : '';
+                const unreadCount = unreadCounts[session.id] || 0;
+                const unreadBadge = unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : '';
 
                 return `
                     <div class="history-item ${isActive}" onclick="loadSession('${session.id}')">
                         <div class="history-item-content">
-                            <div class="history-item-title">${escapeHtml(session.title)}</div>
+                            <div class="history-item-title">
+                                ${escapeHtml(session.title)}
+                                ${unreadBadge}
+                            </div>
                             <div class="history-item-date">${dateStr}</div>
                         </div>
                         <div class="history-item-actions">
@@ -2477,15 +3003,33 @@
                     const contentWithTokens = msg.content + `\n\n<div class="token-info">📊 Потрачено токенов: ${totalTokens.toLocaleString()} (вход: ${input_tokens.toLocaleString()}, выход: ${output_tokens.toLocaleString()})</div>`;
 
                     // Добавляем в UI с токенами, но в историю сохраняем без токенов
-                    addMessage(msg.role, contentWithTokens, false);
-                    conversationHistory.push({ role: msg.role, content: msg.content });
+                    addMessage(msg.role, contentWithTokens, false, msg.timestamp);
+                    conversationHistory.push({ role: msg.role, content: msg.content, timestamp: msg.timestamp });
                 } else {
-                    addMessage(msg.role, msg.content, false);
+                    addMessage(msg.role, msg.content, false, msg.timestamp);
+                    conversationHistory.push({ role: msg.role, content: msg.content, timestamp: msg.timestamp });
                 }
             }
 
             // Обновляем текущий session_id
             currentSessionId = sessionId;
+
+            // Помечаем все сообщения в этой сессии как прочитанные
+            try {
+                await fetch(`/api/sessions/${sessionId}/mark_read`, {
+                    method: 'POST'
+                });
+                console.log(`✅ Сообщения в сессии ${sessionId} помечены как прочитанные`);
+
+                // Обновляем список сессий для обновления счетчиков
+                loadSessionsList();
+            } catch (error) {
+                console.error('Ошибка пометки сообщений как прочитанных:', error);
+            }
+
+            // Reconnect WebSocket to new session
+            disconnectWebSocket();
+            connectWebSocket(sessionId);
 
             // Закрываем панель истории
             closeHistory();
@@ -2537,6 +3081,10 @@
 
         console.log('🆕 Начат новый чат');
         console.log('🔑 Новый Session ID:', currentSessionId);
+
+        // Reconnect WebSocket to new session
+        disconnectWebSocket();
+        connectWebSocket(currentSessionId);
 
         // Закрываем панель истории
         closeHistory();
@@ -2599,6 +3147,12 @@
 
         // Обновляем высоту при загрузке страницы
         window.addEventListener('load', updateSettingsPanelHeight);
+
+        // Request notification permission
+        requestNotificationPermission();
+
+        // Connect WebSocket for current session
+        connectWebSocket(currentSessionId);
     });
 
     // Token Modal Functions
@@ -2670,13 +3224,16 @@
     }
 
     // Утилита для создания DOM сообщения
-    function createMessageDOM(role, content) {
+    function createMessageDOM(role, content, timestamp = null) {
       const wrapper = document.createElement('div');
       wrapper.className = `message-wrapper ${role}`;
 
       const avatar = document.createElement('div');
       avatar.className = `avatar ${role}`;
       avatar.textContent = role === 'user' ? '👤' : '🤖';
+
+      const messageContainer = document.createElement('div');
+      messageContainer.className = 'message-container';
 
       const message = document.createElement('div');
       message.className = `message ${role}`;
@@ -2696,12 +3253,24 @@
         message.textContent = String(content);
       }
 
+      messageContainer.appendChild(message);
+
+      // Добавляем timestamp если есть
+      if (timestamp) {
+        const timestampDiv = document.createElement('div');
+        timestampDiv.className = 'message-timestamp';
+        const date = new Date(timestamp);
+        const timeStr = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        timestampDiv.textContent = timeStr;
+        messageContainer.appendChild(timestampDiv);
+      }
+
       wrapper.appendChild(avatar);
-      wrapper.appendChild(message);
+      wrapper.appendChild(messageContainer);
       return wrapper;
     }
 
-    function addMessage(role, content, addToHistory = true) {
+    function addMessage(role, content, addToHistory = true, timestamp = null) {
       // Если контент содержит HTML с токенами, очищаем его для истории
       let cleanContent = content;
       if (typeof content === 'string' && content.includes('token-info')) {
@@ -2709,16 +3278,20 @@
         cleanContent = content.replace(/<div class="token-info">.*?<\/div>/gs, '').trim();
       }
 
-      chat.appendChild(createMessageDOM(role, content));
+      // Если timestamp не передан, используем текущее время
+      const msgTimestamp = timestamp || new Date().toISOString();
+
+      chat.appendChild(createMessageDOM(role, content, msgTimestamp));
       if (addToHistory && (role === 'user' || role === 'assistant')) {
-        conversationHistory.push({ role, content: cleanContent });
+        conversationHistory.push({ role, content: cleanContent, timestamp: msgTimestamp });
       }
       chat.scrollTop = chat.scrollHeight;
     }
 
     function addAssistantMessageWithTokens(cleanContent, displayContent) {
-      chat.appendChild(createMessageDOM('assistant', displayContent));
-      conversationHistory.push({ role: 'assistant', content: cleanContent });
+      const timestamp = new Date().toISOString();
+      chat.appendChild(createMessageDOM('assistant', displayContent, timestamp));
+      conversationHistory.push({ role: 'assistant', content: cleanContent, timestamp });
       messageCountSinceCompression++;
       console.log(`💬 Сообщение добавлено. Счётчик: ${messageCountSinceCompression}`);
       chat.scrollTop = chat.scrollHeight;
@@ -3303,6 +3876,14 @@
     window.visualViewport.addEventListener('scroll', updateViewportVars);
   }
   updateViewportVars();
+
+  // Периодическое обновление напоминаний (каждые 30 секунд)
+  setInterval(async () => {
+    const reminderPanel = document.getElementById('reminderPanel');
+    if (reminderPanel && reminderPanel.classList.contains('active')) {
+      await loadReminders();
+    }
+  }, 30000);
 
   // When input gets focus, scroll it into view and ensure it's above keyboard
   const inputEl = document.getElementById('input');

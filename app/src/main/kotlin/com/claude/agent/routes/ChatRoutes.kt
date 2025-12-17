@@ -83,7 +83,8 @@ fun Route.chatRoutes(
                 temperature = temperature,
                 enabledTools = request.enabled_tools,
                 clientIp = clientIp,
-                userLocation = request.user_location
+                userLocation = request.user_location,
+                sessionId = request.session_id
             )
 
             // Обработка ошибок
@@ -151,6 +152,28 @@ fun Route.chatRoutes(
 
         } catch (e: Exception) {
             logger.error("Ошибка в /api/count_tokens: ${e.message}", e)
+            call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Ошибка сервера: ${e.message}"))
+        }
+    }
+
+    /**
+     * POST /api/sessions/{sessionId}/mark_read - пометить все сообщения сессии как прочитанные.
+     */
+    post("/api/sessions/{sessionId}/mark_read") {
+        try {
+            val sessionId = call.parameters["sessionId"]
+            if (sessionId.isNullOrBlank()) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("Session ID is required"))
+                return@post
+            }
+
+            val updatedCount = repository.markMessagesAsRead(sessionId)
+            logger.info("Marked $updatedCount messages as read in session: $sessionId")
+
+            call.respond(HttpStatusCode.OK, mapOf("updated" to updatedCount))
+
+        } catch (e: Exception) {
+            logger.error("Ошибка в /api/sessions/{sessionId}/mark_read: ${e.message}", e)
             call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Ошибка сервера: ${e.message}"))
         }
     }

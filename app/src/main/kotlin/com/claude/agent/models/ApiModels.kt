@@ -13,7 +13,9 @@ import kotlinx.serialization.Serializable
 data class Message(
     val role: String,           // "user" или "assistant"
     val content: String,
-    val usage: TokenUsage? = null
+    val usage: TokenUsage? = null,
+    val timestamp: String? = null,  // ISO 8601 timestamp
+    val read: Boolean = false       // Прочитано ли сообщение
 )
 
 @Serializable
@@ -135,4 +137,21 @@ data class CreateSessionResponse(
 @Serializable
 data class DeleteSessionResponse(
     val message: String
+)
+
+@Serializable
+data class Reminder(
+    val id: String,
+    val sessionId: String? = null,
+    val text: String,
+    val due_at: String,
+    val created_at: String,
+    val updated_at: String,
+    val done: Boolean,
+    val notified: Boolean = false,
+    val recurrenceType: String = "none", // none, minutely, hourly, daily, weekly, monthly
+    val recurrenceInterval: Int = 1, // every N minutes/hours/days/weeks/months
+    val recurrenceEndDate: String? = null, // when to stop recurring (ISO 8601)
+    val taskType: String = "reminder", // reminder, ai_response, mcp_tool
+    val taskContext: String? = null // JSON with task details
 )

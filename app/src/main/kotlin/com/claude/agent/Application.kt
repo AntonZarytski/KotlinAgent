@@ -5,13 +5,17 @@ import com.claude.agent.database.ConversationRepository
 import com.claude.agent.database.DatabaseFactory
 import com.claude.agent.routes.chatRoutes
 import com.claude.agent.routes.healthRoutes
+import com.claude.agent.routes.reminderRoutes
 import com.claude.agent.routes.sessionRoutes
+import com.claude.agent.routes.webSocketRoutes
+import com.claude.agent.service.ReminderService
 import com.claude.agent.services.ClaudeClient
 import com.claude.agent.services.GeolocationService
 import com.claude.agent.services.HistoryCompressor
 import com.claude.agent.services.LocalMCPClient
 import com.claude.agent.services.MCPTools
 import com.claude.agent.services.RemoteMCPClient
+import com.claude.agent.services.WebSocketService
 import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -28,6 +32,8 @@ import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.server.websocket.*
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
@@ -110,16 +116,28 @@ fun Application.module() {
             socketTimeoutMillis = 120_000   // 120 секунд на чтение данных из сокета
         }
     }
-
-    val remoteMcpClient = RemoteMCPClient()
-
-    val localMCPClient = LocalMCPClient(httpClient = httpClient)
+    val geolocationService = GeolocationService(httpClient)
 
     // === Инициализация сервисов ===
     val repository = ConversationRepository()
+    val webSocketService = WebSocketService()
+
+    val reminderService = ReminderService(repository, webSocketService)
+
+    val remoteMcpClient = RemoteMCPClient()
+    val localMCPClient = LocalMCPClient(
+        httpClient = httpClient,
+        geolocationService = geolocationService,
+        reminderService = reminderService
+    )
+
     val mcpTools = MCPTools(localMCP = localMCPClient, remoteMCP = remoteMcpClient)
     val claudeClient = ClaudeClient(httpClient, mcpTools)
     val historyCompressor = HistoryCompressor(claudeClient)
+
+    reminderService.claudeClient = claudeClient
+    reminderService.mcpTools = mcpTools
+    reminderService.startScheduler()
 
     logger.info("=== Сервисы инициализированы ===")
     logger.info("Порт: ${AppConfig.port}")
@@ -152,6 +170,13 @@ fun Application.module() {
         filter { call -> call.request.local.uri.startsWith("/api") }
     }
 
+    install(WebSockets) {
+        pingPeriodMillis = 15000
+        timeoutMillis = 15000
+        maxFrameSize = Long.MAX_VALUE
+        masking = false
+    }
+
     install(StatusPages) {
         exception<Throwable> { call, cause ->
             logger.error("Необработанное исключение: ${cause.message}", cause)
@@ -173,6 +198,12 @@ fun Application.module() {
 
         // Session management
         sessionRoutes(repository)
+
+        // Reminder management
+        reminderRoutes(reminderService)
+
+        // WebSocket for real-time updates
+        webSocketRoutes(webSocketService)
 
         // Статические файлы (UI)
         val staticFolder = AppConfig.staticFolder

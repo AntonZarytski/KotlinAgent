@@ -72,12 +72,14 @@ class MCPTools(
      * @param arguments Аргументы инструмента
      * @param clientIp IP-адрес клиента для автоматического определения местоположения
      * @param userLocation Координаты пользователя из браузера (если доступны)
+     * @param sessionId ID сессии чата для привязки напоминаний
      */
     suspend fun callTool(
         toolName: String,
         arguments: JsonObject,
         clientIp: String? = null,
-        userLocation: UserLocation? = null
+        userLocation: UserLocation? = null,
+        sessionId: String? = null
     ): String {
         return when (toolName) {
             "get_weather_forecast" -> {
@@ -94,6 +96,14 @@ class MCPTools(
                     clientIp = clientIp,
                     userLocation = userLocation
                 )
+            }
+
+            "reminder" -> {
+                localMCP.executeReminderTool(arguments, sessionId)
+            }
+
+            "get_chat_summary" -> {
+                localMCP.executeChatSummaryTool(arguments.toString())
             }
 
             else -> {

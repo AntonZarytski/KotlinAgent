@@ -103,7 +103,7 @@ echo ""
 echo "Шаг 6: Health check..."
 sleep 2
 
-curl -s "http://95.217.187.167:$APP_PORT/health" || echo "❌ Health check failed"
+curl -s "https://95.217.187.167:$APP_PORT/health" || echo "❌ Health check failed"
 
 echo ""
 echo "=== ✅ Деплой завершён ==="

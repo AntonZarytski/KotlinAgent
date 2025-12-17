@@ -100,7 +100,7 @@ data class Settings(
 )
 
 // API Client
-class ClaudeApiClient(private val baseUrl: String = "http://localhost:8000") {
+class ClaudeApiClient(private val baseUrl: String = "https://localhost:8001") {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json {

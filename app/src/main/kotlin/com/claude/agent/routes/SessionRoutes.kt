@@ -130,5 +130,18 @@ fun Route.sessionRoutes(repository: ConversationRepository) {
                 call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Ошибка сервера: ${e.message}"))
             }
         }
+
+        /**
+         * GET /api/sessions/unread_counts - получить количество непрочитанных сообщений для всех сессий.
+         */
+        get("/unread_counts") {
+            try {
+                val unreadCounts = repository.getUnreadCountsForAllSessions()
+                call.respond(HttpStatusCode.OK, mapOf("unread_counts" to unreadCounts))
+            } catch (e: Exception) {
+                logger.error("Ошибка получения непрочитанных сообщений: ${e.message}", e)
+                call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Ошибка сервера: ${e.message}"))
+            }
+        }
     }
 }

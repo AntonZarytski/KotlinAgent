@@ -30,6 +30,7 @@ ktorSerializationJson = { module = "io.ktor:ktor-serialization-kotlinx-json", ve
 ktorServerCors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }
 ktorServerCallLogging = { module = "io.ktor:ktor-server-call-logging", version.ref = "ktor" }
 ktorServerStatusPages = { module = "io.ktor:ktor-server-status-pages", version.ref = "ktor" }
+ktorServerWebSockets = { module = "io.ktor:ktor-server-websockets", version.ref = "ktor" }
 ktorClientCore = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktorClientOkHttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
 ktorClientContentNegotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
@@ -50,7 +51,7 @@ dotenv = { module = "io.github.cdimascio:dotenv-kotlin", version.ref = "dotenv" 
 # Libraries can be bundled together for easier import
 [bundles]
 kotlinxEcosystem = ["kotlinxDatetime", "kotlinxSerialization", "kotlinxCoroutines"]
-ktorServer = ["ktorServerCore", "ktorServerNetty", "ktorServerContentNegotiation", "ktorSerializationJson", "ktorServerCors", "ktorServerCallLogging", "ktorServerStatusPages"]
+ktorServer = ["ktorServerCore", "ktorServerNetty", "ktorServerContentNegotiation", "ktorSerializationJson", "ktorServerCors", "ktorServerCallLogging", "ktorServerStatusPages", "ktorServerWebSockets"]
 ktorClient = ["ktorClientCore", "ktorClientOkHttp", "ktorClientContentNegotiation", "ktorClientLogging"]
 exposed = ["exposedCore", "exposedDao", "exposedJdbc"]
 

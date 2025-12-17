@@ -1,6 +1,8 @@
 package com.claude.agent.models
 
 import com.claude.agent.config.OutputFormat
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 /**
  * Промпты для различных форматов вывода Claude API.
@@ -106,8 +108,18 @@ object SystemPrompts {
      * @return Склеенный системный промпт
      */
     fun getSystemPrompt(outputFormat: String, enabledTools: List<String>, specMode: Boolean = false): String {
+        // Получаем текущее время с часовым поясом
+        val currentTime = ZonedDateTime.now()
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
+        val formattedTime = currentTime.format(formatter)
+
         // Выбираем базовый промпт
         var basePrompt = if (specMode) SPEC_MODE else DEFAULT_MODE
+
+        // Добавляем текущее время
+        basePrompt = """Текущее время: $formattedTime
+
+$basePrompt"""
 
         if (enabledTools.isNotEmpty()) {
             var toolsPrompt = "Доступны инструменты:"
@@ -115,6 +127,12 @@ object SystemPrompts {
                 when (toolName) {
                     "get_weather_forecast" -> toolsPrompt += "\n-get_weather_forecast(lat, lon) - текущая погода"
                     "get_solar_activity" -> toolsPrompt += "\n- get_solar_activity(lat, lon) - солнечная активность, полярные сияния"
+                    "reminder" -> toolsPrompt += """Если пользователь просит:
+                                                    - напомнить
+                                                    - создать напоминание
+                                                    - уведомить в будущем
+                                                    
+                                                    Ты обязан вызвать MCP tool "reminder" с action="add"."""
                     "kiwi-com-flight-search" -> toolsPrompt += "\n- kiwi-com-flight-search remote MCP - Позволяет быстро подобрать лучшие варианты перелётов с учётом маршрута, дат (включая гибкость ±3 дня), типа поездки, количества пассажиров и класса обслуживания."
                 }
             }

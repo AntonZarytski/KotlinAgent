@@ -2,6 +2,7 @@ package com.claude.agent.database
 
 import com.claude.agent.config.AppConfig
 import com.claude.agent.database.models.Messages
+import com.claude.agent.database.models.Reminders
 import com.claude.agent.database.models.Sessions
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
@@ -28,9 +29,9 @@ object DatabaseFactory {
             driver = "org.sqlite.JDBC"
         )
 
-        // Создаём таблицы если не существуют
+        // Создаём таблицы и недостающие колонки если не существуют
         transaction {
-            SchemaUtils.create(Sessions, Messages)
+            SchemaUtils.createMissingTablesAndColumns(Sessions, Messages, Reminders)
             logger.info("Таблицы базы данных инициализированы успешно")
         }
     }
