@@ -2560,7 +2560,7 @@
 
             // Если enabledTools пусто, включаем только локальные инструменты по умолчанию
             if (enabledTools.length === 0) {
-                let enabledTools = [];
+                enabledTools = localTools.map(t => t.name);
             }
 
             let html = '';
@@ -2577,6 +2577,7 @@
                                 <input
                                     type="checkbox"
                                     value="${escapeHtml(tool.name)}"
+                                    ${enabledTools.includes(tool.name) ? 'checked' : ''}
                                     onchange="toggleTool('${escapeHtml(tool.name)}', this.checked)"
                                 >
                                 <div>
