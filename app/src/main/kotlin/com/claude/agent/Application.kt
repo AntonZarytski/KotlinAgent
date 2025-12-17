@@ -1,8 +1,10 @@
 package com.claude.agent
 
 import com.claude.agent.config.AppConfig
+import com.claude.agent.config.AppConfig.port
 import com.claude.agent.database.ConversationRepository
 import com.claude.agent.database.DatabaseFactory
+import com.claude.agent.module
 import com.claude.agent.routes.chatRoutes
 import com.claude.agent.routes.healthRoutes
 import com.claude.agent.routes.reminderRoutes
@@ -22,6 +24,7 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.client.plugins.*
 import io.ktor.http.*
+import io.ktor.network.tls.certificates.generateCertificate
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
@@ -33,17 +36,15 @@ import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
 import java.io.File
+import java.security.KeyStore
 
 /**
  * Главный файл приложения Ktor.
- *
- * Аналог App.py из Python-версии.
- * Настраивает сервер, роутинг, middleware и запускает приложение.
+ ** Настраивает сервер, роутинг, middleware и запускает приложение.
  */
 
 /**
@@ -80,15 +81,63 @@ private fun resolveStaticPath(staticFolder: String, logger: org.slf4j.Logger): F
     return null
 }
 
+fun generateCertificateIfNeeded() {
+    val certFile = File("ktor.p12")
+    if (!certFile.exists()) {
+        LoggerFactory.getLogger("Application").info("Генерация SSL сертификата...")
+        generateCertificate(
+            file = certFile,
+            keyAlias = "ktor",
+            keyPassword = "changeit",
+            jksPassword = "changeit"
+        )
+        LoggerFactory.getLogger("Application").info("SSL сертификат создан: ${certFile.absolutePath}")
+    }
+}
+
+fun loadKeyStore(filename: String, password: String): KeyStore {
+    val keyStore = KeyStore.getInstance("PKCS12")
+    keyStore.load(File(filename).inputStream(), password.toCharArray())
+    return keyStore
+}
+
 fun main() {
+    val logger = LoggerFactory.getLogger("Application")
+
     // Инициализация базы данных
     DatabaseFactory.init()
 
-    // Запуск Ktor сервера
+    // Генерация SSL сертификата если его нет
+    generateCertificateIfNeeded()
+
+    // Запуск Ktor сервера с SSL (Ktor 3)
     embeddedServer(
         Netty,
-        port = AppConfig.port,
-        host = AppConfig.host,
+        applicationEnvironment {
+            log = logger
+        },
+        configure = {
+            // HTTP коннектор
+            connector {
+                port = AppConfig.port
+                host = AppConfig.host
+            }
+
+            // HTTPS коннектор
+            val keyStoreFile = File("ktor.p12")
+            val keyStore = loadKeyStore("ktor.p12", "changeit")
+
+            sslConnector(
+                keyStore = keyStore,
+                keyAlias = "ktor",
+                keyStorePassword = { "changeit".toCharArray() },
+                privateKeyPassword = { "changeit".toCharArray() }
+            ) {
+                port = 8443
+                host = AppConfig.host
+                keyStorePath = keyStoreFile
+            }
+        },
         module = Application::module
     ).start(wait = true)
 }
@@ -256,6 +305,7 @@ fun Application.module() {
     }
 
     logger.info("=== Сервер запущен ===")
-    logger.info("URL: http://${AppConfig.host}:${AppConfig.port}")
+    logger.info("HTTP URL:  http://${AppConfig.host}:${AppConfig.port}")
+    logger.info("HTTPS URL: https://${AppConfig.host}:8443")
     logger.info("======================")
 }

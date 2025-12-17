@@ -38,7 +38,8 @@ set -e
 mkdir -p \
   $REMOTE_DIR/app/build/libs \
   $REMOTE_DIR/ui \
-  $REMOTE_DIR/deploy
+  $REMOTE_DIR/deploy \
+  $REMOTE_DIR/scripts
 chown -R agent:agent $REMOTE_DIR
 ENDSSH
 
@@ -51,7 +52,11 @@ echo "Шаг 3: Копирование файлов..."
 scp "$APP_JAR" "$SERVER:$REMOTE_DIR/app/build/libs/"
 scp -r ui/ "$SERVER:$REMOTE_DIR/"
 scp -r deploy/ "$SERVER:$REMOTE_DIR/"
+scp -r scripts/ "$SERVER:$REMOTE_DIR/"
 scp .env "$SERVER:$REMOTE_DIR/"
+
+# Делаем скрипты исполняемыми на сервере
+ssh "$SERVER" "chmod +x $REMOTE_DIR/scripts/*.sh $REMOTE_DIR/deploy/*.sh"
 
 echo "✅ Файлы скопированы"
 echo ""
@@ -103,8 +108,28 @@ echo ""
 echo "Шаг 6: Health check..."
 sleep 2
 
-curl -s "https://95.217.187.167:$APP_PORT/health" || echo "❌ Health check failed"
+# Проверяем HTTP (основной порт)
+if curl -s "http://95.217.187.167:$APP_PORT/health" | grep -q "ok"; then
+    echo "✅ HTTP Health check passed"
+else
+    echo "❌ HTTP Health check failed"
+fi
+
+# Проверяем HTTPS (порт 8443) с игнорированием самоподписанного сертификата
+if curl -k -s "https://95.217.187.167:8443/health" | grep -q "ok"; then
+    echo "✅ HTTPS Health check passed"
+else
+    echo "⚠️  HTTPS Health check failed (возможно, нужно настроить SSL)"
+fi
 
 echo ""
 echo "=== ✅ Деплой завершён ==="
-echo "URL: http://95.217.187.167:$APP_PORT"
+echo ""
+echo "Доступные URL:"
+echo "  HTTP:  http://95.217.187.167:$APP_PORT"
+echo "  HTTPS: https://95.217.187.167:8443 (самоподписанный сертификат)"
+echo ""
+echo "Для настройки настоящего SSL сертификата:"
+echo "  ./scripts/setup-duckdns-ssl.sh myapp TOKEN email@example.com"
+echo "  или"
+echo "  sudo ./scripts/setup-ssl-nginx.sh yourdomain.com email@example.com"

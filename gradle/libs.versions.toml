@@ -25,6 +25,7 @@ compose-material-desktop = { module = "org.jetbrains.compose.material3:material3
 ktorClientCio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 ktorServerCore = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
 ktorServerNetty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
+ktorServerCertificate = { module = "io.ktor:ktor-network-tls-certificates", version.ref = "ktor" }
 ktorServerContentNegotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
 ktorSerializationJson = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
 ktorServerCors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }
@@ -51,7 +52,7 @@ dotenv = { module = "io.github.cdimascio:dotenv-kotlin", version.ref = "dotenv" 
 # Libraries can be bundled together for easier import
 [bundles]
 kotlinxEcosystem = ["kotlinxDatetime", "kotlinxSerialization", "kotlinxCoroutines"]
-ktorServer = ["ktorServerCore", "ktorServerNetty", "ktorServerContentNegotiation", "ktorSerializationJson", "ktorServerCors", "ktorServerCallLogging", "ktorServerStatusPages", "ktorServerWebSockets"]
+ktorServer = ["ktorServerCore", "ktorServerNetty", "ktorServerCertificate", "ktorServerContentNegotiation", "ktorSerializationJson", "ktorServerCors", "ktorServerCallLogging", "ktorServerStatusPages", "ktorServerWebSockets"]
 ktorClient = ["ktorClientCore", "ktorClientOkHttp", "ktorClientContentNegotiation", "ktorClientLogging"]
 exposed = ["exposedCore", "exposedDao", "exposedJdbc"]
 

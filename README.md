@@ -29,6 +29,10 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 24)
 ./gradlew :app:run
 ```
 
+Сервер будет доступен по адресам:
+- HTTP: `http://localhost:8001`
+- HTTPS: `https://localhost:8443` (самоподписанный сертификат)
+
 ### Другие команды
 * Run `./gradlew build` to only build the application.
 * Run `./gradlew check` to run all checks, including tests.
