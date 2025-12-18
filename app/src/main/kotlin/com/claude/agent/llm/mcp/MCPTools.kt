@@ -26,31 +26,19 @@ class MCPTools(
      * Возвращает определения инструментов в формате Anthropic API.
      * Обрабатывает как локальные инструменты, так и remote MCP серверы.
      */
-    fun getToolsDefinitions(enabledTools: List<String>): List<LocalToolDefinition> {
+    fun getLocalToolsDefinitions(enabledTools: List<String>): List<LocalToolDefinition> {
         logger.info("getToolsDefinitions for: $enabledTools")
-
-        // Разделяем локальные инструменты и remote MCP серверы
-        val localToolNames = mutableListOf<String>()
-        val remoteServerNames = mutableListOf<String>()
-
-        val allRemoteServers = remoteMcpProvider.getAllServers().map { it.name }
-
-        enabledTools.forEach { toolName ->
-            if (toolName in allRemoteServers) {
-                remoteServerNames.add(toolName)
-            } else {
-                localToolNames.add(toolName)
-            }
-        }
-
-        // Включаем remote MCP серверы
-        remoteServerNames.forEach { serverName ->
-            remoteMcpProvider.setServerEnabled(serverName, true)
-        }
-
         // Возвращаем только локальные инструменты
-        return localMcpProvider.getToolsDefinitions(localToolNames)
+        return localMcpProvider.getToolsDefinitions(enabledTools)
     }
+
+    fun enableServers(enabledTools: List<String>) {
+        enabledTools.forEach { toolName ->
+            remoteMcpProvider.setToolEnabled(toolName = toolName, enabled = true)
+            localMcpProvider.setToolEnabled(toolName = toolName, enabled = true)
+        }
+    }
+
 
     fun getLocalTools(): List<LocalToolDefinition> {
         val local = localMcpProvider.getAllTools()

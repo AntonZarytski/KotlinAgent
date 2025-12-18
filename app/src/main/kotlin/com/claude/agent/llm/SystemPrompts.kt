@@ -1,6 +1,12 @@
-package com.claude.agent.models
+package com.claude.agent.llm
 
 import com.claude.agent.config.OutputFormat
+import com.claude.agent.llm.mcp.ACTION_PLANNER
+import com.claude.agent.llm.mcp.AIR_TICKETS
+import com.claude.agent.llm.mcp.CHAT_SUMMARY
+import com.claude.agent.llm.mcp.REMINDER
+import com.claude.agent.llm.mcp.SOLAR
+import com.claude.agent.llm.mcp.WEATHER
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -120,20 +126,21 @@ object SystemPrompts {
         basePrompt = """Текущее время: $formattedTime
 
 $basePrompt"""
-
         if (enabledTools.isNotEmpty()) {
             var toolsPrompt = "Доступны инструменты:"
             enabledTools.forEach { toolName ->
                 when (toolName) {
-                    "get_weather_forecast" -> toolsPrompt += "\n-get_weather_forecast(lat, lon) - текущая погода"
-                    "get_solar_activity" -> toolsPrompt += "\n- get_solar_activity(lat, lon) - солнечная активность, полярные сияния"
-                    "reminder" -> toolsPrompt += """Если пользователь просит:
+                    ACTION_PLANNER -> toolsPrompt += "\n - $ACTION_PLANNER - планировщик действий для выполнения задачи c возможностью вызова mcp последовательно"
+                    WEATHER -> toolsPrompt += "\n-$WEATHER(lat, lon) - текущая погода"
+                    SOLAR -> toolsPrompt += "\n- $SOLAR(lat, lon) - солнечная активность, полярные сияния"
+                    REMINDER -> toolsPrompt += """Если пользователь просит:
                                                     - напомнить
                                                     - создать напоминание
                                                     - уведомить в будущем
                                                     
-                                                    Ты обязан вызвать MCP tool "reminder" с action="add"."""
-                    "kiwi-com-flight-search" -> toolsPrompt += "\n- kiwi-com-flight-search remote MCP - Позволяет быстро подобрать лучшие варианты перелётов с учётом маршрута, дат (включая гибкость ±3 дня), типа поездки, количества пассажиров и класса обслуживания."
+                                                    Ты обязан вызвать MCP tool $REMINDER с action="add"."""
+                    CHAT_SUMMARY -> toolsPrompt += "\n- $CHAT_SUMMARY - получить краткое summary текущего чата"
+                    AIR_TICKETS -> toolsPrompt += "\n- $AIR_TICKETS remote MCP - Позволяет быстро подобрать лучшие варианты перелётов с учётом маршрута, дат (включая гибкость ±3 дня), типа поездки, количества пассажиров и класса обслуживания."
                 }
             }
             toolsPrompt += """

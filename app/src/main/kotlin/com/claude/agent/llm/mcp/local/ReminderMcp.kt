@@ -1,6 +1,7 @@
 package com.claude.agent.llm.mcp.local
 
 import com.claude.agent.llm.mcp.Mcp
+import com.claude.agent.llm.mcp.REMINDER
 import com.claude.agent.models.UserLocation
 import com.claude.agent.service.ReminderService
 import com.claude.agent.llm.mcp.local.model.LocalToolDefinition
@@ -14,10 +15,11 @@ class ReminderMcp(
     private val logger = LoggerFactory.getLogger(ReminderMcp::class.java)
 
     override val tool: Pair<String, LocalToolDefinition> = Pair(
-        first = "reminder",
+        first = REMINDER,
         second = LocalToolDefinition(
-            name = "reminder",
+            name = REMINDER,
             description = "Возможность создать/удалить напоминание с указанным описанием и временем. Поддерживает повторяющиеся напоминания (каждую минуту, час, день, неделю, месяц). Также поддерживает отложенные AI задачи - когда нужно сгенерировать ответ в будущем (например, 'отправь мне рецепт пиццы через 30 секунд') или вызвать MCP инструмент в будущем (например, 'покажи погоду через 1 минуту').",
+            enabled = true,
             input_schema = JsonObject(
                 mapOf(
                     "type" to JsonPrimitive("object"),

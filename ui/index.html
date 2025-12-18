@@ -2560,7 +2560,7 @@
 
             // Если enabledTools пусто, включаем только локальные инструменты по умолчанию
             if (enabledTools.length === 0) {
-                enabledTools = localTools.map(t => t.name);
+                let enabledTools = [];
             }
 
             let html = '';

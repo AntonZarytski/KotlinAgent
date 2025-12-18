@@ -1,6 +1,7 @@
 package com.claude.agent.llm.mcp.local
 
 import com.claude.agent.llm.mcp.Mcp
+import com.claude.agent.llm.mcp.SOLAR
 import com.claude.agent.models.UserLocation
 import com.claude.agent.service.GeolocationService
 import com.claude.agent.llm.mcp.local.model.LocalToolDefinition
@@ -25,10 +26,11 @@ class SolarActivityMcp(
     private val logger = LoggerFactory.getLogger(SolarActivityMcp::class.java)
 
     override val tool: Pair<String, LocalToolDefinition> = Pair(
-        first = "get_solar_activity",
+        first = SOLAR,
         second = LocalToolDefinition(
-            name = "get_solar_activity",
+            name = SOLAR,
             description = "Получает данные о солнечной активности и вероятности наблюдения полярных сияний для указанного местоположения. Возвращает Kp-индекс, уровень активности и вероятность видимости авроры. Если координаты не указаны, местоположение определяется автоматически по IP-адресу.",
+            enabled = true,
             input_schema = JsonObject(
                 mapOf(
                     "type" to JsonPrimitive("object"),

@@ -1,5 +1,6 @@
 package com.claude.agent.llm.mcp.local
 
+import com.claude.agent.llm.mcp.CHAT_SUMMARY
 import com.claude.agent.llm.mcp.Mcp
 import com.claude.agent.models.UserLocation
 import com.claude.agent.llm.mcp.local.model.LocalToolDefinition
@@ -12,9 +13,9 @@ class ChatSummaryMcp() : Mcp.Local {
     private val logger = LoggerFactory.getLogger(ChatSummaryMcp::class.java)
 
     override val tool: Pair<String, LocalToolDefinition> = Pair(
-        first = "get_chat_summary",
+        first = CHAT_SUMMARY,
         second = LocalToolDefinition(
-            name = "get_chat_summary",
+            name = CHAT_SUMMARY,
             description = """
                 Возвращает краткое summary текущего чата.
                 Используй этот инструмент, когда нужно:
@@ -27,6 +28,7 @@ class ChatSummaryMcp() : Mcp.Local {
                 Он должен быть вызван моделью, которая сама сформирует summary,
                 основываясь на истории текущего чата.
                 """.trimIndent(),
+            enabled = true,
             input_schema = JsonObject(
                 mapOf(
                     "type" to JsonPrimitive("object"),

@@ -13,6 +13,7 @@ import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.service.GeolocationService
 import com.claude.agent.service.HistoryCompressor
 import com.claude.agent.llm.mcp.MCPTools
+import com.claude.agent.llm.mcp.local.ActionPlannerMcp
 import com.claude.agent.llm.mcp.providers.RemoteMcpProvider
 import com.claude.agent.service.WebSocketService
 import com.claude.agent.llm.mcp.local.ChatSummaryMcp
@@ -180,10 +181,11 @@ fun Application.module() {
 
     val localMcpProvider = LocalMcpProvider(
         listOf(
+            ActionPlannerMcp(),
             WeatherMcp(httpClient, geolocationService),
             SolarActivityMcp(httpClient, geolocationService),
             ChatSummaryMcp(),
-            ReminderMcp(reminderService)
+            ReminderMcp(reminderService),
         )
     )
 

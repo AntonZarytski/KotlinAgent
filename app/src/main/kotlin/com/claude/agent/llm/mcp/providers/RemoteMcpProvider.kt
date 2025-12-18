@@ -17,27 +17,15 @@ class RemoteMcpProvider(private val mcps: List<Mcp.Remote>) {
         mcp.tool.first to mcp.tool.second
     }
 
-    private val enabledServers = mutableSetOf<String>()
-
     fun getAllServers(): List<RemoteToolDefinition> {
         return config.values.toList()
-    }
-
-    fun getMcp(serverName: String): Mcp.Remote? {
-        return mcps.find { it.tool.first == serverName }
     }
 
     /**
      * Включает или выключает remote MCP сервер
      */
-    fun setServerEnabled(serverName: String, enabled: Boolean) {
-        if (enabled) {
-            enabledServers.add(serverName)
-            logger.info("Remote MCP сервер '$serverName' включен")
-        } else {
-            enabledServers.remove(serverName)
-            logger.info("Remote MCP сервер '$serverName' выключен")
-        }
+    fun setToolEnabled(toolName: String, enabled: Boolean) {
+        mcps.find { it.tool.first == toolName }?.tool?.second?.enabled = enabled
     }
 
     /**
@@ -45,9 +33,8 @@ class RemoteMcpProvider(private val mcps: List<Mcp.Remote>) {
      * Только для включенных серверов
      */
     fun getMcpParams(): JsonArray {
-        val servers = enabledServers.mapNotNull { serverName ->
-            getMcp(serverName)?.tool?.second?.let { Json.encodeToJsonElement(it) }
-        }
+        val servers = mcps.filter { it.tool.second.enabled }
+            .map { it.params }
 
         if (servers.isNotEmpty()) {
             logger.info("Активные remote MCP серверы: ${servers.size} шт.")

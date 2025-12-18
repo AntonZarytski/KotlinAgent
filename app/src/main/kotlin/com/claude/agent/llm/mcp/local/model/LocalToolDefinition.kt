@@ -7,5 +7,6 @@ import kotlinx.serialization.json.JsonObject
 data class LocalToolDefinition(
     val name: String,
     val description: String,
-    val input_schema: JsonObject
+    val input_schema: JsonObject,
+    var enabled: Boolean
 )

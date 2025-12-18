@@ -1,6 +1,7 @@
 package com.claude.agent.llm.mcp.local
 
 import com.claude.agent.llm.mcp.Mcp
+import com.claude.agent.llm.mcp.WEATHER
 import com.claude.agent.models.UserLocation
 import com.claude.agent.service.GeolocationService
 import com.claude.agent.llm.mcp.local.model.LocalToolDefinition
@@ -25,10 +26,11 @@ class WeatherMcp(
     private val logger = LoggerFactory.getLogger(WeatherMcp::class.java)
 
     override val tool: Pair<String, LocalToolDefinition> = Pair(
-        first = "get_weather_forecast",
+        first = WEATHER,
         second = LocalToolDefinition(
-            name = "get_weather_forecast",
+            name = WEATHER,
             description = "Получает прогноз погоды по географическому местоположению. Возвращает текущую температуру, описание погоды, скорость ветра и вероятность осадков. Если координаты не указаны, местоположение определяется автоматически по IP-адресу.",
+            enabled = true,
             input_schema = JsonObject(
                 mapOf(
                     "type" to JsonPrimitive("object"),

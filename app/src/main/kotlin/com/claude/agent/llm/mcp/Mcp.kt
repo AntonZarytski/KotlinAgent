@@ -24,3 +24,10 @@ sealed interface Mcp {
         val params: JsonObject
     }
 }
+
+const val AIR_TICKETS = "kiwi-com-flight-search"
+const val WEATHER = "get_weather_forecast"
+const val SOLAR = "get_solar_activity"
+const val CHAT_SUMMARY = "chat_summary"
+const val REMINDER = "reminder"
+const val ACTION_PLANNER = "plan_actions"

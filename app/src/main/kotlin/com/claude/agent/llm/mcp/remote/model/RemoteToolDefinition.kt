@@ -10,5 +10,5 @@ data class RemoteToolDefinition(
     val name: String,
     val url: String,
     val description: String,
-    val enabled: Boolean = false
+    var enabled: Boolean = false
 )

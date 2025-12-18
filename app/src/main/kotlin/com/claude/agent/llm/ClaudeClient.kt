@@ -4,7 +4,6 @@ import com.claude.agent.config.AppConfig
 import com.claude.agent.config.ClaudeConfig
 import com.claude.agent.config.SPEC_END_MARKER
 import com.claude.agent.models.Message
-import com.claude.agent.models.SystemPrompts
 import com.claude.agent.models.TokenUsage
 import com.claude.agent.llm.mcp.MCPTools
 import io.ktor.client.*
@@ -65,6 +64,7 @@ class ClaudeClient(
             // Формируем массив сообщений с историей
             val messages = buildMessages(conversationHistory, cleanUserMessage)
 
+            mcpTools.enableServers(enabledTools)
             // Получаем remote MCP серверы
             val remoteMcp = mcpTools.getRemoteMCP()
 
@@ -290,7 +290,7 @@ class ClaudeClient(
     }
 
     private fun getFilteredTools(enabledTools: List<String>, remoteMcp: JsonArray): JsonArray? {
-        val allTools = mcpTools.getToolsDefinitions(enabledTools)
+        val allTools = mcpTools.getLocalToolsDefinitions(enabledTools)
         val filtered = allTools.filter { it.name in enabledTools }
 
         val elements = buildList {

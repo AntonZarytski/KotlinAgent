@@ -20,4 +20,12 @@ class LocalMcpProvider(private val mcps: List<Mcp.Local>) {
         val local = tools.map { it.value }
         return local
     }
+
+    fun setToolEnabled(toolName: String, enabled: Boolean) {
+        tools.forEach {
+            if (it.key == toolName) {
+                it.value.enabled = enabled
+            }
+        }
+    }
 }
