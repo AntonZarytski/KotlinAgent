@@ -1,4 +1,4 @@
-package com.claude.agent.services
+package com.claude.agent.service
 
 import io.ktor.client.*
 import io.ktor.client.request.*

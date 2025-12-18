@@ -1,10 +1,8 @@
-package com.claude.agent.services
+package com.claude.agent.service
 
-import com.claude.agent.config.ClaudeConfig
 import com.claude.agent.config.CompressionConfig
 import com.claude.agent.models.Message
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
+import com.claude.agent.llm.ClaudeClient
 import org.slf4j.LoggerFactory
 
 /**
@@ -67,10 +65,12 @@ class HistoryCompressor(
 
         // Формируем новую историю: [summary] + [последние сообщения]
         val compressedHistory = mutableListOf<Message>()
-        compressedHistory.add(Message(
-            role = "user",
-            content = "[Ранее обсуждали: $summaryText]"
-        ))
+        compressedHistory.add(
+            Message(
+                role = "user",
+                content = "[Ранее обсуждали: $summaryText]"
+            )
+        )
         compressedHistory.addAll(messagesToKeep)
 
         logger.info("История сжата: ${history.size} -> ${compressedHistory.size} сообщений")

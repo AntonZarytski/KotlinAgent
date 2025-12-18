@@ -1,10 +1,10 @@
-package com.claude.agent.services
+package com.claude.agent.llm.mcp
 
 import com.claude.agent.models.UserLocation
-import io.ktor.client.*
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
-import kotlinx.serialization.Serializable
+import com.claude.agent.llm.mcp.local.model.LocalToolDefinition
+import com.claude.agent.llm.mcp.providers.LocalMcpProvider
+import com.claude.agent.llm.mcp.providers.RemoteMcpProvider
+import com.claude.agent.llm.mcp.remote.model.RemoteToolDefinition
 import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
 
@@ -17,8 +17,8 @@ import org.slf4j.LoggerFactory
  * Поддерживает автоматическое определение местоположения пользователя по IP-адресу.
  */
 class MCPTools(
-    private val localMCP: LocalMCPClient,
-    private val remoteMCP: RemoteMCPClient
+    private val localMcpProvider: LocalMcpProvider,
+    private val remoteMcpProvider: RemoteMcpProvider
 ) {
     private val logger = LoggerFactory.getLogger(MCPTools::class.java)
 
@@ -26,14 +26,14 @@ class MCPTools(
      * Возвращает определения инструментов в формате Anthropic API.
      * Обрабатывает как локальные инструменты, так и remote MCP серверы.
      */
-    fun getToolsDefinitions(enabledTools: List<String>): List<ToolDefinition> {
+    fun getToolsDefinitions(enabledTools: List<String>): List<LocalToolDefinition> {
         logger.info("getToolsDefinitions for: $enabledTools")
 
         // Разделяем локальные инструменты и remote MCP серверы
         val localToolNames = mutableListOf<String>()
         val remoteServerNames = mutableListOf<String>()
 
-        val allRemoteServers = remoteMCP.getAllServers().map { it.name }
+        val allRemoteServers = remoteMcpProvider.getAllServers().map { it.name }
 
         enabledTools.forEach { toolName ->
             if (toolName in allRemoteServers) {
@@ -45,24 +45,26 @@ class MCPTools(
 
         // Включаем remote MCP серверы
         remoteServerNames.forEach { serverName ->
-            remoteMCP.setServerEnabled(serverName, true)
+            remoteMcpProvider.setServerEnabled(serverName, true)
         }
 
         // Возвращаем только локальные инструменты
-        return localMCP.getToolsDefinitions(localToolNames)
+        return localMcpProvider.getToolsDefinitions(localToolNames)
     }
 
-    fun getAllTools(): List<ToolDefinition> {
-        val local = localMCP.getAllTools()
-        logger.info("getAllTools: local: $local")
+    fun getLocalTools(): List<LocalToolDefinition> {
+        val local = localMcpProvider.getAllTools()
+        logger.info("getLocalTools: $local")
         return local
     }
 
     /**
      * Возвращает список всех доступных remote MCP серверов
      */
-    fun getAllRemoteServers(): List<RemoteMCPServerConfig> {
-        return remoteMCP.getAllServers()
+    fun getRemoteTools(): List<RemoteToolDefinition> {
+        val remote = remoteMcpProvider.getAllServers()
+        logger.info("getRemoteTools: $remote")
+        return remote
     }
 
     /**
@@ -74,52 +76,18 @@ class MCPTools(
      * @param userLocation Координаты пользователя из браузера (если доступны)
      * @param sessionId ID сессии чата для привязки напоминаний
      */
-    suspend fun callTool(
+    suspend fun callLocalTool(
         toolName: String,
         arguments: JsonObject,
         clientIp: String? = null,
         userLocation: UserLocation? = null,
         sessionId: String? = null
     ): String {
-        return when (toolName) {
-            "get_weather_forecast" -> {
-                localMCP.getWeatherForecast(
-                    arguments = arguments,
-                    clientIp = clientIp,
-                    userLocation = userLocation
-                )
-            }
-
-            "get_solar_activity" -> {
-                localMCP.getSolarActivity(
-                    arguments = arguments,
-                    clientIp = clientIp,
-                    userLocation = userLocation
-                )
-            }
-
-            "reminder" -> {
-                localMCP.executeReminderTool(arguments, sessionId)
-            }
-
-            "get_chat_summary" -> {
-                localMCP.executeChatSummaryTool(arguments.toString())
-            }
-
-            else -> {
-                "call wrong tool"
-            }
-        }
+        return localMcpProvider.getTool(toolName)?.executeTool(arguments, clientIp, userLocation, sessionId)
+            ?: "Tool $toolName not found"
     }
 
     fun getRemoteMCP(): JsonArray {
-        return remoteMCP.getMcpParams()
+        return remoteMcpProvider.getMcpParams()
     }
 }
-
-@Serializable
-data class ToolDefinition(
-    val name: String,
-    val description: String,
-    val input_schema: JsonObject
-)

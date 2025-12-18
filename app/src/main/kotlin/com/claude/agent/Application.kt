@@ -1,23 +1,26 @@
 package com.claude.agent
 
 import com.claude.agent.config.AppConfig
-import com.claude.agent.config.AppConfig.port
 import com.claude.agent.database.ConversationRepository
 import com.claude.agent.database.DatabaseFactory
-import com.claude.agent.module
 import com.claude.agent.routes.chatRoutes
 import com.claude.agent.routes.healthRoutes
 import com.claude.agent.routes.reminderRoutes
 import com.claude.agent.routes.sessionRoutes
 import com.claude.agent.routes.webSocketRoutes
 import com.claude.agent.service.ReminderService
-import com.claude.agent.services.ClaudeClient
-import com.claude.agent.services.GeolocationService
-import com.claude.agent.services.HistoryCompressor
-import com.claude.agent.services.LocalMCPClient
-import com.claude.agent.services.MCPTools
-import com.claude.agent.services.RemoteMCPClient
-import com.claude.agent.services.WebSocketService
+import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.service.GeolocationService
+import com.claude.agent.service.HistoryCompressor
+import com.claude.agent.llm.mcp.MCPTools
+import com.claude.agent.llm.mcp.providers.RemoteMcpProvider
+import com.claude.agent.service.WebSocketService
+import com.claude.agent.llm.mcp.local.ChatSummaryMcp
+import com.claude.agent.llm.mcp.providers.LocalMcpProvider
+import com.claude.agent.llm.mcp.local.ReminderMcp
+import com.claude.agent.llm.mcp.local.SolarActivityMcp
+import com.claude.agent.llm.mcp.local.WeatherMcp
+import com.claude.agent.llm.mcp.remote.AirTicketsMcp
 import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -173,14 +176,18 @@ fun Application.module() {
 
     val reminderService = ReminderService(repository, webSocketService)
 
-    val remoteMcpClient = RemoteMCPClient()
-    val localMCPClient = LocalMCPClient(
-        httpClient = httpClient,
-        geolocationService = geolocationService,
-        reminderService = reminderService
+    val remoteMcpProvider = RemoteMcpProvider(listOf(AirTicketsMcp()))
+
+    val localMcpProvider = LocalMcpProvider(
+        listOf(
+            WeatherMcp(httpClient, geolocationService),
+            SolarActivityMcp(httpClient, geolocationService),
+            ChatSummaryMcp(),
+            ReminderMcp(reminderService)
+        )
     )
 
-    val mcpTools = MCPTools(localMCP = localMCPClient, remoteMCP = remoteMcpClient)
+    val mcpTools = MCPTools(localMcpProvider = localMcpProvider, remoteMcpProvider = remoteMcpProvider)
     val claudeClient = ClaudeClient(httpClient, mcpTools)
     val historyCompressor = HistoryCompressor(claudeClient)
 

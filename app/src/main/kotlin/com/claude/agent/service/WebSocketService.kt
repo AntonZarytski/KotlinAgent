@@ -1,4 +1,4 @@
-package com.claude.agent.services
+package com.claude.agent.service
 
 import io.ktor.websocket.*
 import kotlinx.coroutines.channels.ClosedReceiveChannelException

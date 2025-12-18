@@ -3,8 +3,8 @@ package com.claude.agent.routes
 import com.claude.agent.config.ErrorMessages
 import com.claude.agent.database.ConversationRepository
 import com.claude.agent.models.*
-import com.claude.agent.services.ClaudeClient
-import com.claude.agent.services.HistoryCompressor
+import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.service.HistoryCompressor
 import io.ktor.http.*
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.*

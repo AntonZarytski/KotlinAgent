@@ -2,10 +2,8 @@ package com.claude.agent.service
 
 import com.claude.agent.database.ConversationRepository
 import com.claude.agent.models.Reminder
-import com.claude.agent.services.ClaudeClient
-import com.claude.agent.services.MCPTools
-import com.claude.agent.services.WebSocketService
-import com.claude.agent.services.WebSocketMessage
+import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.llm.mcp.MCPTools
 import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -210,7 +208,7 @@ class ReminderService(
         scope.launch {
             try {
                 // Call the MCP tool to get raw result
-                val toolResult = mcpTools?.callTool(
+                val toolResult = mcpTools?.callLocalTool(
                     toolName = toolName,
                     arguments = toolArguments,
                     clientIp = null,

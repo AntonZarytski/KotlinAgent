@@ -4,10 +4,9 @@ import com.claude.agent.models.ErrorResponse
 import com.claude.agent.models.HealthResponse
 import com.claude.agent.models.ToolInfo
 import com.claude.agent.models.ToolsResponse
-import com.claude.agent.services.ClaudeClient
-import com.claude.agent.services.MCPTools
+import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.llm.mcp.MCPTools
 import io.ktor.http.*
-import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.time.Instant
@@ -44,7 +43,7 @@ fun Route.healthRoutes(claudeClient: ClaudeClient, mcpTools: MCPTools) {
     get("/api/tools") {
         try {
             // Получаем локальные инструменты
-            val localTools = mcpTools.getAllTools()
+            val localTools = mcpTools.getLocalTools()
             val localToolsList = localTools.map { tool ->
                 ToolInfo(
                     name = tool.name,
@@ -54,7 +53,7 @@ fun Route.healthRoutes(claudeClient: ClaudeClient, mcpTools: MCPTools) {
             }
 
             // Получаем remote MCP серверы
-            val remoteServers = mcpTools.getAllRemoteServers()
+            val remoteServers = mcpTools.getRemoteTools()
             val remoteToolsList = remoteServers.map { server ->
                 ToolInfo(
                     name = server.name,

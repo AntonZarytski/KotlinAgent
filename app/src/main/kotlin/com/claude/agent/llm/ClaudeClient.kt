@@ -1,12 +1,12 @@
-package com.claude.agent.services
+package com.claude.agent.llm
 
 import com.claude.agent.config.AppConfig
 import com.claude.agent.config.ClaudeConfig
-import com.claude.agent.config.ErrorMessages
 import com.claude.agent.config.SPEC_END_MARKER
 import com.claude.agent.models.Message
 import com.claude.agent.models.SystemPrompts
 import com.claude.agent.models.TokenUsage
+import com.claude.agent.llm.mcp.MCPTools
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
@@ -14,11 +14,8 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
-import kotlinx.serialization.json.add
 
 /**
  * Клиент для работы с Claude API (Anthropic).
@@ -209,7 +206,7 @@ class ClaudeClient(
                     logger.info("Вызов инструмента: $toolName")
 
                     val result = try {
-                        mcpTools.callTool(toolName, toolInput, clientIp, userLocation, sessionId)
+                        mcpTools.callLocalTool(toolName, toolInput, clientIp, userLocation, sessionId)
                     } catch (e: Exception) {
                         logger.error("Ошибка выполнения $toolName: ${e.message}")
                         """{"error": "${e.message}"}"""

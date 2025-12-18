@@ -1,6 +1,6 @@
 package com.claude.agent.routes
 
-import com.claude.agent.services.WebSocketService
+import com.claude.agent.service.WebSocketService
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
