@@ -179,13 +179,15 @@ fun Application.module() {
 
     val remoteMcpProvider = RemoteMcpProvider(listOf(AirTicketsMcp()))
 
+    val reminderMcp = ReminderMcp(reminderService)
+
     val localMcpProvider = LocalMcpProvider(
         listOf(
             ActionPlannerMcp(),
             WeatherMcp(httpClient, geolocationService),
             SolarActivityMcp(httpClient, geolocationService),
             ChatSummaryMcp(),
-            ReminderMcp(reminderService),
+            reminderMcp,
         )
     )
 
@@ -195,6 +197,7 @@ fun Application.module() {
 
     reminderService.claudeClient = claudeClient
     reminderService.mcpTools = mcpTools
+    reminderMcp.claudeClient = claudeClient
     reminderService.startScheduler()
 
     logger.info("=== Сервисы инициализированы ===")

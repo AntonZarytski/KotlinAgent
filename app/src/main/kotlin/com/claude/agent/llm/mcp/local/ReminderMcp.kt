@@ -1,5 +1,6 @@
 package com.claude.agent.llm.mcp.local
 
+import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.llm.mcp.Mcp
 import com.claude.agent.llm.mcp.REMINDER
 import com.claude.agent.models.UserLocation
@@ -13,6 +14,9 @@ class ReminderMcp(
     val reminderService: ReminderService,
 ) : Mcp.Local {
     private val logger = LoggerFactory.getLogger(ReminderMcp::class.java)
+
+    // ClaudeClient will be set after initialization to avoid circular dependency
+    var claudeClient: ClaudeClient? = null
 
     override val tool: Pair<String, LocalToolDefinition> = Pair(
         first = REMINDER,
@@ -66,7 +70,7 @@ class ReminderMcp(
                             "task_context" to JsonObject(
                                 mapOf(
                                     "type" to JsonPrimitive("string"),
-                                    "description" to JsonPrimitive("JSON с контекстом задачи. Для ai_response: {\"user_request\": \"текст запроса пользователя\"}. Для mcp_tool: {\"tool_name\": \"название инструмента\", \"tool_arguments\": {...}, \"user_request\": \"оригинальный запрос пользователя\"}. Для reminder: не требуется")
+                                    "description" to JsonPrimitive("JSON с контекстом задачи. Для ai_response: {\"user_request\": \"текст запроса пользователя\", \"accumulated_results\": \"результаты уже выполненных инструментов (например, данные о рейсах и погоде)\"}. Для mcp_tool: {\"tool_name\": \"название инструмента\", \"tool_arguments\": {...}, \"user_request\": \"оригинальный запрос пользователя\"}. Для reminder: не требуется")
                                 )
                             ),
                             "recurrence_type" to JsonObject(
@@ -131,7 +135,34 @@ class ReminderMcp(
 
                 // Parse task parameters
                 val taskType = arguments["task_type"]?.jsonPrimitive?.content ?: "reminder"
-                val taskContext = arguments["task_context"]?.jsonPrimitive?.content
+                var taskContext = arguments["task_context"]?.jsonPrimitive?.content
+
+                // For ai_response tasks, enrich task_context with accumulated tool results
+                if (taskType == "ai_response" && claudeClient != null) {
+                    val accumulatedResults = claudeClient!!.getAccumulatedToolResults()
+                    if (accumulatedResults.isNotEmpty()) {
+                        // Build a summary of accumulated results
+                        val resultsSummary = accumulatedResults.entries.joinToString("\n\n") { (toolName, result) ->
+                            "Результат инструмента $toolName:\n${result.take(500)}"
+                        }
+
+                        // Parse existing context or create new one
+                        val contextObj = try {
+                            taskContext?.let { Json.parseToJsonElement(it).jsonObject.toMutableMap() } ?: mutableMapOf()
+                        } catch (e: Exception) {
+                            logger.warn("Failed to parse task_context, creating new one: ${e.message}")
+                            mutableMapOf()
+                        }
+
+                        // Add accumulated results to context
+                        contextObj["accumulated_results"] = JsonPrimitive(resultsSummary)
+
+                        // Serialize back to JSON string
+                        taskContext = Json.encodeToString(JsonObject(contextObj))
+
+                        logger.info("Enriched task_context with accumulated results from ${accumulatedResults.size} tools")
+                    }
+                }
 
                 val reminder = reminderService.addReminder(
                     text = text,

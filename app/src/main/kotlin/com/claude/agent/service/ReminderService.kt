@@ -114,16 +114,21 @@ class ReminderService(
             return
         }
 
-        // Parse task context to get user request
-        val userRequest = try {
+        // Parse task context to get user request and accumulated results
+        val (userRequest, accumulatedResults) = try {
             val context = Json.parseToJsonElement(reminder.taskContext ?: "{}")
-            context.jsonObject["user_request"]?.jsonPrimitive?.content ?: reminder.text
+            val request = context.jsonObject["user_request"]?.jsonPrimitive?.content ?: reminder.text
+            val results = context.jsonObject["accumulated_results"]?.jsonPrimitive?.content
+            Pair(request, results)
         } catch (e: Exception) {
             logger.error("Error parsing task context: ${e.message}")
-            reminder.text
+            Pair(reminder.text, null)
         }
 
         logger.info("Executing AI response task for request: $userRequest")
+        if (accumulatedResults != null) {
+            logger.info("Accumulated results available: ${accumulatedResults.take(200)}...")
+        }
 
         // Execute AI request asynchronously
         scope.launch {
@@ -131,9 +136,23 @@ class ReminderService(
                 // Get conversation history
                 val history = conversationRepository.getSessionHistory(reminder.sessionId)
 
+                // Build the prompt with accumulated results if available
+                val promptMessage = if (accumulatedResults != null) {
+                    """
+                    Пользователь запросил: "$userRequest"
+
+                    Уже были получены следующие результаты:
+                    $accumulatedResults
+
+                    Пожалуйста, представь эти результаты пользователю в удобном для чтения формате.
+                    """.trimIndent()
+                } else {
+                    userRequest
+                }
+
                 // Call Claude API
                 val (reply, usage, error) = claudeClient!!.sendMessage(
-                    userMessage = userRequest,
+                    userMessage = promptMessage,
                     conversationHistory = history,
                     sessionId = reminder.sessionId,
                     userLocation = null,

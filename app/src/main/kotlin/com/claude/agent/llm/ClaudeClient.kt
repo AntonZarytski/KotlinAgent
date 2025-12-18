@@ -3,6 +3,7 @@ package com.claude.agent.llm
 import com.claude.agent.config.AppConfig
 import com.claude.agent.config.ClaudeConfig
 import com.claude.agent.config.SPEC_END_MARKER
+import com.claude.agent.llm.mcp.REMINDER
 import com.claude.agent.models.Message
 import com.claude.agent.models.TokenUsage
 import com.claude.agent.llm.mcp.MCPTools
@@ -32,9 +33,20 @@ class ClaudeClient(
 
     companion object {
         private const val MAX_TOOL_ITERATIONS = 5
+
+        // Thread-local storage for accumulated tool results during a conversation turn
+        private val accumulatedToolResults = ThreadLocal<MutableMap<String, String>>()
     }
 
     val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
+
+    /**
+     * Get accumulated tool results for the current conversation turn.
+     * This is used by tools (like reminder) that need access to results from previous tool calls.
+     */
+    fun getAccumulatedToolResults(): Map<String, String> {
+        return accumulatedToolResults.get() ?: emptyMap()
+    }
 
     /**
      * Отправляет сообщение в Claude API и возвращает ответ.
@@ -66,10 +78,10 @@ class ClaudeClient(
 
             mcpTools.enableServers(enabledTools)
             // Получаем remote MCP серверы
-            val remoteMcp = mcpTools.getRemoteMCP()
+            val remoteMcpParams = mcpTools.getRemoteMCP()
 
-            // Получаем инструменты (включая remote MCP toolsets)
-            val tools = getFilteredTools(enabledTools, remoteMcp)
+            // Получаем инструменты
+            val localMcpParams = getFilteredTools(enabledTools, remoteMcpParams)
 
             // Формируем запрос
             val requestBody = buildAnthropicRequest(
@@ -78,8 +90,8 @@ class ClaudeClient(
                 systemPrompt = systemPrompt,
                 messages = messages,
                 temperature = temperature,
-                tools = tools,
-                remoteMcp = remoteMcp,
+                tools = localMcpParams,
+                remoteMcp = remoteMcpParams,
                 specMode = specMode
             )
 
@@ -87,8 +99,8 @@ class ClaudeClient(
             logger.info("Модель: $model")
             logger.info("Max tokens: $maxTokens")
             logger.info("Temperature: $temperature")
-            if (tools != null) {
-                logger.info("MCP инструменты: ${tools.size} шт.")
+            if (localMcpParams != null) {
+                logger.info("MCP инструменты: ${localMcpParams.size} шт.")
             }
             logger.info("Сообщений: ${messages.size}")
             logger.info("=====================================")
@@ -99,7 +111,7 @@ class ClaudeClient(
                 header("x-api-key", apiKey)
                 header("anthropic-version", "2023-06-01")
                 // Добавляем beta header для поддержки MCP connector
-                if (remoteMcp.isNotEmpty()) {
+                if (remoteMcpParams.isNotEmpty()) {
                     header("anthropic-beta", "mcp-client-2025-11-20")
                 }
                 contentType(ContentType.Application.Json)
@@ -117,17 +129,17 @@ class ClaudeClient(
 
             // Обрабатываем ответ (с поддержкой tool_use)
             val (finalReply, totalUsage) = handleResponse(
-                responseBody,
-                messages,
-                model,
-                maxTokens,
-                systemPrompt,
-                temperature,
-                tools,
-                remoteMcp,
-                clientIp,
-                userLocation,
-                sessionId
+                responseBody = responseBody,
+                initialMessages = messages,
+                model = model,
+                maxTokens = maxTokens,
+                systemPrompt = systemPrompt,
+                temperature = temperature,
+                tools = localMcpParams,
+                remoteMcp = remoteMcpParams,
+                clientIp = clientIp,
+                userLocation = userLocation,
+                sessionId = sessionId
             )
 
             logger.info("Ответ получен за ${elapsed}ms")
@@ -164,6 +176,10 @@ class ClaudeClient(
 
         var iteration = 0
 
+        // Initialize thread-local storage for accumulated tool results
+        val toolResultsMap = mutableMapOf<String, String>()
+        accumulatedToolResults.set(toolResultsMap)
+
         while (iteration < MAX_TOOL_ITERATIONS) {
             val content = currentResponse["content"]?.jsonArray ?: JsonArray(emptyList())
 
@@ -172,21 +188,38 @@ class ClaudeClient(
                 block.jsonObject["type"]?.jsonPrimitive?.content == "tool_use"
             }
 
+            // Извлекаем текстовые блоки (могут быть вместе с tool_use)
+            val textBlocks = content.mapNotNull { block ->
+                if (block.jsonObject["type"]?.jsonPrimitive?.content == "text") {
+                    block.jsonObject["text"]?.jsonPrimitive?.content
+                } else null
+            }
+
             if (!hasToolUse) {
-                // Финальный текстовый ответ
-                val textBlocks = content.mapNotNull { block ->
-                    if (block.jsonObject["type"]?.jsonPrimitive?.content == "text") {
-                        block.jsonObject["text"]?.jsonPrimitive?.content
-                    } else null
-                }
+                // Финальный текстовый ответ (нет больше tool_use)
                 val finalText = textBlocks.joinToString("")
                 val usage = TokenUsage(totalInputTokens, totalOutputTokens)
+
+                // Clean up thread-local storage
+                accumulatedToolResults.remove()
+
+                // Если финальный текст пустой, это означает, что Claude не вернул текстовый ответ
+                // после выполнения всех инструментов. Возвращаем сообщение по умолчанию.
+                if (finalText.isBlank()) {
+                    logger.warn("Claude returned empty text response after tool execution. Iteration: $iteration")
+                    return Pair("✅ Задача выполнена", usage)
+                }
+
                 return Pair(finalText, usage)
             }
 
             // Есть tool_use - обрабатываем
             iteration++
-            logger.info("=== Tool call итерация $iteration ===")
+            val currentText = textBlocks.joinToString("")
+            logger.info("=== Tool call iteration $iteration - Calling: ${content.filter { it.jsonObject["type"]?.jsonPrimitive?.content == "tool_use" }.joinToString(", ") { it.jsonObject["name"]?.jsonPrimitive?.content ?: "unknown" }} ===")
+            if (currentText.isNotBlank()) {
+                logger.info("Text in this iteration: ${currentText.take(100)}...")
+            }
 
             // Добавляем ответ ассистента в историю
             messages.add(JsonObject(mapOf(
@@ -203,13 +236,20 @@ class ClaudeClient(
                     val toolInput = blockObj["input"]?.jsonObject ?: JsonObject(emptyMap())
                     val toolUseId = blockObj["id"]?.jsonPrimitive?.content ?: continue
 
-                    logger.info("Вызов инструмента: $toolName")
+                    logger.info("Tool call iteration $iteration - Calling: $toolName")
 
                     val result = try {
                         mcpTools.callLocalTool(toolName, toolInput, clientIp, userLocation, sessionId)
                     } catch (e: Exception) {
                         logger.error("Ошибка выполнения $toolName: ${e.message}")
                         """{"error": "${e.message}"}"""
+                    }
+
+                    logger.info("Tool result for $toolName: ${result.take(200)}...")
+
+                    // Store result in accumulated map (except for reminder tool itself)
+                    if (toolName != REMINDER) {
+                        toolResultsMap[toolName] = result
                     }
 
                     toolResults.add(JsonObject(mapOf(
@@ -256,6 +296,10 @@ class ClaudeClient(
 
         // Лимит итераций достигнут
         logger.warn("Достигнут лимит tool call итераций ($MAX_TOOL_ITERATIONS)")
+
+        // Clean up thread-local storage
+        accumulatedToolResults.remove()
+
         val content = currentResponse["content"]?.jsonArray ?: JsonArray(emptyList())
         val textBlocks = content.mapNotNull { block ->
             if (block.jsonObject["type"]?.jsonPrimitive?.content == "text") {
