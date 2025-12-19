@@ -1844,6 +1844,76 @@
     #chat {
         margin-bottom: 80px;
     }
+
+    /* 🔥 НОВОЕ: Стили для промежуточных streaming сообщений */
+    .streaming-message {
+        animation: streamingPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes streamingPulse {
+        0%, 100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.85;
+        }
+    }
+
+    .streaming-message .message {
+        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+        border-left: 4px solid #f59e0b;
+        position: relative;
+    }
+
+    .streaming-badge {
+        animation: badgePulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes badgePulse {
+        0%, 100% {
+            transform: scale(1);
+            opacity: 1;
+        }
+        50% {
+            transform: scale(1.05);
+            opacity: 0.9;
+        }
+    }
+
+    /* 🔥 НОВОЕ: Стили для RAW результатов инструментов */
+    .tool-result-message .message {
+        background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+        border-left: 4px solid #10b981;
+        position: relative;
+    }
+
+    .tool-result-badge {
+        animation: toolBadgePulse 2s ease-in-out infinite;
+    }
+
+    @keyframes toolBadgePulse {
+        0%, 100% {
+            transform: scale(1);
+            opacity: 1;
+        }
+        50% {
+            transform: scale(1.02);
+            opacity: 0.95;
+        }
+    }
+
+    /* Улучшенное отображение кода в результатах инструментов */
+    .tool-result-message .message pre {
+        max-height: 600px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    .tool-result-message .message code {
+        font-size: 12px;
+        line-height: 1.4;
+    }
     </style>
 </head>
 <body>
@@ -1972,6 +2042,18 @@
                 </label>
             </div>
 
+            <!-- Режим отображения промежуточных сообщений -->
+            <div class="setting-group">
+                <label>💬 Промежуточные сообщения</label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="showAllIntermediateMessages" checked>
+                    <div>
+                        <div class="checkbox-label">Показывать все промежуточные сообщения</div>
+                        <div class="checkbox-desc">Если выключено, будет показываться только одно обновляемое сообщение</div>
+                    </div>
+                </label>
+            </div>
+
             <!-- Инструменты (Tools) -->
             <div class="setting-group">
                 <label>🔧 Инструменты MCP</label>
@@ -2061,6 +2143,7 @@
     const temperatureSlider = document.getElementById('temperature');
     const temperatureValue = document.getElementById('temperatureValue');
     const showTokenCountCheckbox = document.getElementById('showTokenCountCheckbox');
+    const showAllIntermediateMessagesCheckbox = document.getElementById('showAllIntermediateMessages');
     const tokenModal = document.getElementById('tokenModal');
     const tokenCountValue = document.getElementById('tokenCountValue');
 
@@ -2085,6 +2168,9 @@
 
     // WebSocket connection
     let ws = null;
+
+    // Промежуточное сообщение (для streaming)
+    let currentStreamingMessage = null;
 
     // Функция генерации уникального ID сессии
     function generateSessionId() {
@@ -2140,6 +2226,118 @@
 
       if (message.type === 'connected') {
         console.log('WebSocket connection confirmed');
+        return;
+      }
+
+      if (message.type === 'streaming_text') {
+        // 🔥 НОВОЕ: Обработка промежуточного текста
+        const messageData = JSON.parse(message.data);
+        console.log('📡 Streaming text received (iteration ' + messageData.iteration + '):', messageData.content);
+
+        // Скрываем индикатор загрузки если он есть
+        hideLoadingIndicator();
+
+        // Проверяем режим отображения
+        const showAllMessages = showAllIntermediateMessagesCheckbox.checked;
+
+        if (showAllMessages) {
+          // Режим "показывать все сообщения" - создаем новое сообщение для каждой итерации
+          const timestamp = new Date().toISOString();
+          const messageElement = createMessageDOM('assistant', messageData.content, timestamp);
+
+          // Добавляем специальный класс для промежуточных сообщений
+          messageElement.classList.add('streaming-message');
+
+          // Добавляем индикатор что это промежуточное сообщение
+          const badge = document.createElement('div');
+          badge.className = 'streaming-badge';
+          badge.textContent = `⚡ Обработка... (итерация ${messageData.iteration})`;
+          badge.style.cssText = 'display: inline-block; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 8px;';
+          messageElement.querySelector('.message').appendChild(badge);
+
+          chat.appendChild(messageElement);
+        } else {
+          // Режим "одно обновляемое сообщение" - обновляем существующее или создаем новое
+          if (!currentStreamingMessage) {
+            const timestamp = new Date().toISOString();
+            const messageElement = createMessageDOM('assistant', messageData.content, timestamp);
+
+            // Добавляем специальный класс для промежуточных сообщений
+            messageElement.classList.add('streaming-message');
+
+            // Добавляем индикатор что это промежуточное сообщение
+            const badge = document.createElement('div');
+            badge.className = 'streaming-badge';
+            badge.textContent = `⚡ Обработка... (итерация ${messageData.iteration})`;
+            badge.style.cssText = 'display: inline-block; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 8px;';
+            messageElement.querySelector('.message').appendChild(badge);
+
+            chat.appendChild(messageElement);
+            currentStreamingMessage = messageElement;
+          } else {
+            // Обновляем существующее промежуточное сообщение
+            const messageDiv = currentStreamingMessage.querySelector('.message .markdown-content');
+            const badge = currentStreamingMessage.querySelector('.streaming-badge');
+            if (messageDiv) {
+              messageDiv.innerHTML = marked.parse(messageData.content);
+            }
+            if (badge) {
+              badge.textContent = `⚡ Обработка... (итерация ${messageData.iteration})`;
+            }
+          }
+        }
+
+        chat.scrollTop = chat.scrollHeight;
+        return;
+      }
+
+      if (message.type === 'tool_result') {
+        // 🔥 НОВОЕ: Обработка RAW результатов инструментов
+        const toolData = JSON.parse(message.data);
+        console.log('🔧 Tool result received:', toolData.tool_name, '- Full result:', toolData.tool_result);
+
+        // Скрываем индикатор загрузки если он есть
+        hideLoadingIndicator();
+
+        // Проверяем режим отображения - показываем tool results только если включен режим "показывать все"
+        const showAllMessages = showAllIntermediateMessagesCheckbox.checked;
+
+        if (showAllMessages) {
+          // Создаем сообщение с RAW результатом инструмента
+          const timestamp = new Date().toISOString();
+          const toolResultContent = `
+### 🔧 Результат инструмента: ${toolData.tool_name}
+
+**Итерация:** ${toolData.iteration} | **Инструмент #${toolData.tool_index}**
+
+**Входные данные:**
+\`\`\`json
+${JSON.stringify(toolData.tool_input, null, 2)}
+\`\`\`
+
+**Результат выполнения:**
+\`\`\`
+${toolData.tool_result}
+\`\`\`
+`;
+
+          const messageElement = createMessageDOM('assistant', toolResultContent, timestamp);
+
+          // Добавляем специальный класс для результатов инструментов
+          messageElement.classList.add('tool-result-message');
+
+          // Добавляем индикатор что это результат инструмента
+          const badge = document.createElement('div');
+          badge.className = 'tool-result-badge';
+          badge.textContent = '🔧 RAW Tool Output';
+          badge.style.cssText = 'display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 8px;';
+          messageElement.querySelector('.message').appendChild(badge);
+
+          chat.appendChild(messageElement);
+          chat.scrollTop = chat.scrollHeight;
+        }
+        // Если режим "одно сообщение", просто логируем в консоль, не показываем в UI
+
         return;
       }
 
@@ -3154,6 +3352,18 @@
 
         // Connect WebSocket for current session
         connectWebSocket(currentSessionId);
+
+        // Загружаем сохраненную настройку отображения промежуточных сообщений
+        const savedShowAllMessages = localStorage.getItem('showAllIntermediateMessages');
+        if (savedShowAllMessages !== null) {
+            showAllIntermediateMessagesCheckbox.checked = savedShowAllMessages === 'true';
+        }
+
+        // Сохраняем настройку при изменении
+        showAllIntermediateMessagesCheckbox.addEventListener('change', function() {
+            localStorage.setItem('showAllIntermediateMessages', this.checked);
+            console.log('💾 Режим отображения промежуточных сообщений:', this.checked ? 'Все сообщения' : 'Одно обновляемое');
+        });
     });
 
     // Token Modal Functions
@@ -3338,6 +3548,9 @@
       let text = input.value.trim();
       if (!text) return;
 
+      // 🔥 НОВОЕ: Сбрасываем промежуточное сообщение перед отправкой нового
+      currentStreamingMessage = null;
+
       // Получаем текущие настройки
       const settings = getSettings();
       const sendHistory = sendHistoryCheckbox.checked;
@@ -3445,6 +3658,12 @@
 
         // Скрываем индикатор загрузки
         hideLoadingIndicator();
+
+        // 🔥 НОВОЕ: Удаляем промежуточное сообщение перед добавлением финального
+        if (currentStreamingMessage) {
+          currentStreamingMessage.remove();
+          currentStreamingMessage = null;
+        }
 
         if (data.error) {
           addMessage('assistant', '❌ ' + data.error, false);
