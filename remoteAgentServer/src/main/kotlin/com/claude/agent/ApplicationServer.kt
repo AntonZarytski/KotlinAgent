@@ -153,24 +153,6 @@ fun main() {
     ).start(wait = true)
 }
 
-// ApplicationServer.kt
-fun Application.configureLocalAgents() {
-    routing {
-        webSocket("/mcp/local-agent") {
-            LocalAgentManager.handleConnection(this)
-        }
-
-        // Endpoint для проверки статуса
-        get("/mcp/agents/status") {
-            val agents = LocalAgentManager.getConnectedAgents()
-            call.respond(mapOf(
-                "connected_agents" to agents,
-                "count" to agents.size
-            ))
-        }
-    }
-}
-
 fun Application.module() {
     val logger = LoggerFactory.getLogger("Application")
 
@@ -278,9 +260,6 @@ fun Application.module() {
         masking = false
     }
 
-    // Настройка роутов для локальных агентов (после установки WebSockets)
-    configureLocalAgents()
-
     install(StatusPages) {
         exception<Throwable> { call, cause ->
             logger.error("Необработанное исключение: ${cause.message}", cause)
@@ -294,6 +273,20 @@ fun Application.module() {
 
     // === Роутинг ===
     routing {
+        // WebSocket для локальных агентов (ДОЛЖЕН БЫТЬ ПЕРВЫМ!)
+        webSocket("/mcp/local-agent") {
+            LocalAgentManager.handleConnection(this)
+        }
+
+        // Endpoint для проверки статуса агентов
+        get("/mcp/agents/status") {
+            val agents = LocalAgentManager.getConnectedAgents()
+            call.respond(mapOf(
+                "connected_agents" to agents,
+                "count" to agents.size
+            ))
+        }
+
         // Health check и tools
         healthRoutes(claudeClient, mcpTools)
 
@@ -312,33 +305,32 @@ fun Application.module() {
         // WebSocket for real-time updates
         webSocketRoutes(webSocketService)
 
-        // Статические файлы (UI)
+        // Статические файлы (UI) - ДОЛЖНЫ БЫТЬ В КОНЦЕ!
         val staticFolder = AppConfig.staticFolder
         val staticPath = resolveStaticPath(staticFolder, logger)
 
+        // Статические файлы для UI (ПОСЛЕ всех API роутов!)
         if (staticPath != null && staticPath.exists() && staticPath.isDirectory) {
-            staticFiles("/", staticPath) {
-                default("index.html")
+            // Обслуживаем статические файлы, но они будут иметь низкий приоритет
+            // так как все API роуты уже зарегистрированы выше
+            staticFiles("/static", staticPath)
+
+            // Отдельный роут для index.html на корневом пути
+            get("/") {
+                val indexFile = File(staticPath, "index.html")
+                if (indexFile.exists()) {
+                    call.respondFile(indexFile)
+                } else {
+                    call.respondText("UI not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                }
             }
+
             logger.info("Статические файлы доступны из: ${staticPath.absolutePath}")
         } else {
             logger.warn("Папка статических файлов не найдена: $staticFolder")
-            logger.warn("Проверенные пути:")
-            logger.warn("  - ${File(staticFolder).absolutePath}")
-            logger.warn("  - ${File(System.getProperty("user.dir"), staticFolder).absolutePath}")
-        }
 
-        // Fallback для корневого URL
-        get("/") {
-            val indexFile = if (staticPath != null) {
-                File(staticPath, "index.html")
-            } else {
-                File(staticFolder, "index.html")
-            }
-
-            if (indexFile.exists()) {
-                call.respondFile(indexFile)
-            } else {
+            // Fallback для корневого URL
+            get("/") {
                 call.respondText(
                     """
                     <!DOCTYPE html>
@@ -352,6 +344,7 @@ fun Application.module() {
                             <li><a href="/api/tools">GET /api/tools</a> - MCP инструменты</li>
                             <li>POST /api/chat - Отправить сообщение Claude</li>
                             <li>GET /api/sessions - Список сессий</li>
+                            <li><a href="/mcp/agents/status">GET /mcp/agents/status</a> - Статус локальных агентов</li>
                         </ul>
                     </body>
                     </html>

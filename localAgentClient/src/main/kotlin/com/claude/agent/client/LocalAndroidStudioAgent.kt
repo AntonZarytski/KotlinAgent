@@ -14,7 +14,7 @@ import javax.net.ssl.X509TrustManager
 import kotlin.time.Duration.Companion.seconds
 
 class LocalAndroidStudioAgent(
-    private val vpsUrl: String = "ws://127.0.0.1:8443",
+    private val vpsUrl: String,
     private val agentId: String = "android-studio-${System.getenv("COMPUTERNAME")}",
     initialAndroidProjectPath: String? = "/Users/anton/StudioProjects"
 ) {
@@ -28,6 +28,8 @@ class LocalAndroidStudioAgent(
                     override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
                     override fun getAcceptedIssuers(): Array<X509Certificate>? = null
                 }
+                // Отключаем проверку hostname для самоподписанных сертификатов
+                serverName = null
             }
         }
         install(WebSockets) {

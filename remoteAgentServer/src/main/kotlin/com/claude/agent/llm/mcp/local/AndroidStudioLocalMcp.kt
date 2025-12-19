@@ -6,7 +6,6 @@ import com.claude.agent.llm.mcp.Mcp
 import com.claude.agent.models.UserLocation
 import com.claude.agent.service.LocalAgentManager
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive

@@ -9,7 +9,7 @@ SERVER="root@95.217.187.167"
 REMOTE_DIR="/home/agent/KotlinAgent"
 LOCAL_DIR="/Users/anton/IdeaProjects/KotlinAgent"
 
-APP_JAR="app/build/libs/app.jar"
+APP_JAR="remoteAgentServer/build/libs/remoteAgentServer.jar"
 APP_PORT="8001"
 
 echo "=== Деплой KotlinAgent ==="
@@ -20,7 +20,7 @@ echo "Шаг 1: Сборка проекта..."
 cd "$LOCAL_DIR"
 
 ./gradlew clean
-./gradlew :app:build -x test
+./gradlew :remoteAgentServer:build -x test
 
 if [ ! -f "$APP_JAR" ]; then
     echo "❌ JAR файл не найден: $APP_JAR"
@@ -36,7 +36,7 @@ echo "Шаг 2: Подготовка сервера..."
 ssh "$SERVER" << ENDSSH
 set -e
 mkdir -p \
-  $REMOTE_DIR/app/build/libs \
+  $REMOTE_DIR/remoteAgentServer/build/libs \
   $REMOTE_DIR/ui \
   $REMOTE_DIR/deploy \
   $REMOTE_DIR/scripts
@@ -49,7 +49,7 @@ echo ""
 ### === 3. КОПИРОВАНИЕ ФАЙЛОВ ===
 
 echo "Шаг 3: Копирование файлов..."
-scp "$APP_JAR" "$SERVER:$REMOTE_DIR/app/build/libs/"
+scp "$APP_JAR" "$SERVER:$REMOTE_DIR/remoteAgentServer/build/libs/"
 scp -r ui/ "$SERVER:$REMOTE_DIR/"
 scp -r deploy/ "$SERVER:$REMOTE_DIR/"
 scp -r scripts/ "$SERVER:$REMOTE_DIR/"
@@ -93,7 +93,7 @@ else
     chmod +x deploy/*.sh
 
     ./deploy/stop.sh || true
-    nohup ./deploy/start.sh > app.log 2>&1 &
+    nohup ./deploy/start.sh > remoteAgentServer.log 2>&1 &
 
     sleep 3
     echo "Java процессы:"
