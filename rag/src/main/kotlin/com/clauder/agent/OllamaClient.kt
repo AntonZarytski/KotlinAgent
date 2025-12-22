@@ -6,6 +6,7 @@ import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.plugins.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -24,6 +25,13 @@ class OllamaClient(private val baseUrl: String = "http://localhost:11434") : Aut
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(json)
+        }
+
+        // Настройка таймаутов для Ollama (может работать медленно)
+        install(HttpTimeout) {
+            requestTimeoutMillis = 120_000  // 120 секунд на весь запрос
+            connectTimeoutMillis = 30_000   // 30 секунд на подключение
+            socketTimeoutMillis = 120_000   // 120 секунд на чтение данных
         }
     }
 

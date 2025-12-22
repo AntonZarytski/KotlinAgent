@@ -1,5 +1,6 @@
 package com.claude.agent.llm
 
+import com.claude.agent.common.database.normalizeToRange
 import com.claude.agent.config.AppConfig
 import com.claude.agent.config.ClaudeConfig
 import com.claude.agent.config.PromptCachingConfig
@@ -630,9 +631,13 @@ class ClaudeClient(
             val queryEmbedding = ollamaEmbeddingClient.embed(query)
             logger.debug("Generated query embedding: ${queryEmbedding.size} dimensions")
 
+            // ВАЖНО: Нормализуем вектор запроса так же, как при индексации
+            val normalizedQueryEmbedding = normalizeToRange(queryEmbedding)
+            logger.debug("Normalized query embedding to [0,1] range")
+
             // Ищем релевантные чанки
             val results = ragService.search(
-                queryEmbedding = queryEmbedding,
+                queryEmbedding = normalizedQueryEmbedding,
                 topK = topK,
                 minSimilarity = 0.3  // Минимальный порог сходства
             )

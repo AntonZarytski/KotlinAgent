@@ -125,8 +125,17 @@ fun loadKeyStore(filename: String, password: String): KeyStore {
 fun main() {
     val logger = LoggerFactory.getLogger("Application")
 
+    logger.info("=== Starting Application ===")
+
     // Инициализация базы данных
-    DatabaseFactory.init()
+    logger.info("Initializing database...")
+    try {
+        DatabaseFactory.init()
+        logger.info("✅ Database initialized successfully")
+    } catch (e: Exception) {
+        logger.error("❌ Failed to initialize database: ${e.message}", e)
+        throw e
+    }
 
     // ВАЖНО: НЕ инициализируем RAG базу данных здесь!
     // Exposed не поддерживает множественные подключения в одном процессе.
@@ -178,6 +187,7 @@ fun Application.module() {
                 ignoreUnknownKeys = true
                 prettyPrint = false
                 isLenient = true
+                encodeDefaults = true  // ВАЖНО: кодировать дефолтные значения (для Ollama model field)
             })
         }
         install(Logging) {
@@ -220,8 +230,8 @@ fun Application.module() {
 
     // === Инициализация RAG сервисов (опционально) ===
     val ragService = try {
-        // Используем путь относительно корня проекта (на уровень выше remoteAgentServer/)
-        RagService(ragDatabasePath = "../rag_index.db")
+        // Путь относительно рабочей директории (корень проекта при запуске через Gradle)
+        RagService(ragDatabasePath = "rag_index.db")
     } catch (e: Exception) {
         logger.warn("RAG service initialization failed: ${e.message}")
         null

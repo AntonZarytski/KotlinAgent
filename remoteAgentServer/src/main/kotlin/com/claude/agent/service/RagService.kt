@@ -3,6 +3,7 @@ package com.claude.agent.service
 import com.claude.agent.common.database.DocumentChunks
 import com.claude.agent.common.database.toFloatArray
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.slf4j.LoggerFactory
@@ -23,10 +24,23 @@ class RagService(
     private val ragDatabase: Database by lazy {
         val jdbcUrl = "jdbc:sqlite:$ragDatabasePath"
         logger.info("Подключение к RAG базе данных: $jdbcUrl")
-        Database.connect(
+        val db = Database.connect(
             url = jdbcUrl,
             driver = "org.sqlite.JDBC"
         )
+
+        // Инициализация схемы базы данных (создание таблицы если не существует)
+        try {
+            transaction(db) {
+                SchemaUtils.createMissingTablesAndColumns(DocumentChunks)
+                logger.info("✅ RAG database schema initialized successfully")
+            }
+        } catch (e: Exception) {
+            logger.error("❌ Failed to initialize RAG database schema: ${e.message}", e)
+            throw e
+        }
+
+        db
     }
     
     data class SearchResult(

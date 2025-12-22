@@ -3,6 +3,7 @@ package com.claude.agent.service
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -39,10 +40,19 @@ class OllamaEmbeddingClient(
      */
     suspend fun embed(text: String): FloatArray {
         return try {
-            val response = httpClient.post("$baseUrl/api/embeddings") {  // Use /api/embeddings endpoint
+            val httpResponse = httpClient.post("$baseUrl/api/embeddings") {
                 contentType(ContentType.Application.Json)
-                setBody(EmbeddingRequest(prompt = text))  // Use 'prompt' field
-            }.body<EmbeddingResponse>()
+                setBody(EmbeddingRequest(prompt = text))
+            }
+
+            // Проверяем статус ответа
+            if (!httpResponse.status.isSuccess()) {
+                val errorBody = httpResponse.bodyAsText()
+                logger.error("Ollama API error: ${httpResponse.status}, body: $errorBody")
+                throw RuntimeException("Ollama API returned ${httpResponse.status}: $errorBody")
+            }
+
+            val response = httpResponse.body<EmbeddingResponse>()
 
             // Convert embedding to FloatArray
             response.embedding.map { it.toFloat() }.toFloatArray()

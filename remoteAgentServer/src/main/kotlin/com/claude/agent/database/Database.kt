@@ -1,6 +1,5 @@
 package com.claude.agent.database
 
-import com.claude.agent.common.database.DocumentChunks
 import com.claude.agent.config.AppConfig
 import com.claude.agent.database.models.Messages
 import com.claude.agent.database.models.Reminders
@@ -25,7 +24,13 @@ object DatabaseFactory {
      * Получить подключение к основной базе данных
      * Используется для явного указания БД в transaction {}
      */
-    fun getMainDatabase(): Database = mainDatabase
+    fun getMainDatabase(): Database {
+        if (!::mainDatabase.isInitialized) {
+            logger.error("mainDatabase не инициализирован! Вызовите DatabaseFactory.init() перед использованием.")
+            throw IllegalStateException("Database not initialized. Call DatabaseFactory.init() first.")
+        }
+        return mainDatabase
+    }
 
     fun init() {
         val databasePath = AppConfig.databasePath
@@ -71,36 +76,6 @@ object DatabaseFactory {
             }
 
             logger.info("Таблицы базы данных инициализированы успешно")
-        }
-    }
-
-    /**
-     * Инициализация RAG базы данных (опционально)
-     * Используется отдельное подключение для RAG индекса
-     *
-     * ВАЖНО: Эта функция НЕ должна вызываться в remoteAgentServer,
-     * так как Exposed не поддерживает множественные подключения в одном процессе.
-     * RAG база данных должна инициализироваться только в модуле :rag
-     */
-    fun initRagDatabase(ragDatabasePath: String = "rag_index.db") {
-        try {
-            val jdbcUrl = "jdbc:sqlite:$ragDatabasePath"
-            logger.info("Инициализация RAG базы данных: $jdbcUrl")
-
-            // Создаем отдельное подключение для RAG
-            // ВНИМАНИЕ: Это подключение станет активным по умолчанию!
-            Database.connect(
-                url = jdbcUrl,
-                driver = "org.sqlite.JDBC"
-            )
-
-            // Проверяем наличие таблицы DocumentChunks
-            transaction {
-                SchemaUtils.createMissingTablesAndColumns(DocumentChunks)
-                logger.info("RAG база данных инициализирована успешно")
-            }
-        } catch (e: Exception) {
-            logger.warn("Не удалось инициализировать RAG базу данных: ${e.message}")
         }
     }
 }

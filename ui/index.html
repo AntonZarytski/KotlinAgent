@@ -2018,6 +2018,18 @@
                 </label>
             </div>
 
+            <!-- RAG (Retrieval-Augmented Generation) -->
+            <div class="setting-group">
+                <label>🔍 RAG (поиск по базе знаний)</label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="useRagCheckbox">
+                    <div>
+                        <div class="checkbox-label">Использовать RAG для контекста</div>
+                        <div class="checkbox-desc">Claude будет искать релевантную информацию в индексированных документах</div>
+                    </div>
+                </label>
+            </div>
+
             <!-- Отправлять историю -->
             <div class="setting-group">
                 <label>💬 История диалога</label>
@@ -2139,6 +2151,7 @@
     const maxTokensValue = document.getElementById('maxTokensValue');
     const specModeCheckbox = document.getElementById('specMode');
     const settingsPanel = document.getElementById('settingsPanel');
+    const useRagCheckbox = document.getElementById('useRagCheckbox');
     const sendHistoryCheckbox = document.getElementById('sendHistoryCheckbox');
     const temperatureSlider = document.getElementById('temperature');
     const temperatureValue = document.getElementById('temperatureValue');
@@ -3430,7 +3443,8 @@ ${toolData.tool_result}
         output_format: outputFormat.value,
         max_tokens: parseInt(maxTokensSlider.value, 10),
         spec_mode: specModeCheckbox.checked,
-        temperature: parseFloat(temperatureSlider.value)
+        temperature: parseFloat(temperatureSlider.value),
+        use_rag: useRagCheckbox.checked
       };
     }
 
@@ -3639,7 +3653,9 @@ ${toolData.tool_result}
           spec_mode: settings.spec_mode,
           temperature: settings.temperature,
           conversation_history: historyToSend,
-          enabled_tools: enabledTools
+          enabled_tools: enabledTools,
+          use_rag: settings.use_rag,
+          rag_top_k: 3
         };
 
         // Добавляем координаты, если они есть
