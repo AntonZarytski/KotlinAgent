@@ -70,25 +70,31 @@ import java.security.KeyStore
  * @return File объект с найденной папкой или null, если не найдена
  */
 private fun resolveStaticPath(staticFolder: String, logger: org.slf4j.Logger): File? {
+    // Убираем ../ui префикс если он есть, оставляем только имя папки
+    val folderName = staticFolder.removePrefix("../").removePrefix("./")
+
     val possiblePaths = listOf(
-        File(staticFolder),                                    // Относительно текущей директории
-        File(System.getProperty("user.dir"), staticFolder),    // Относительно user.dir
-        File(System.getProperty("user.dir"), "../$staticFolder"), // Родительская директория
-        File("app/../$staticFolder")                           // Из app/ в корень проекта
+        File(folderName),                                      // ui относительно текущей директории
+        File(System.getProperty("user.dir"), folderName),     // ui относительно user.dir
+        File(System.getProperty("user.dir"), "../$folderName"), // ../ui из remoteAgentServer/
+        File("../$folderName")                                 // ../ui относительно remoteAgentServer/
     )
 
-    logger.debug("Поиск статических файлов '$staticFolder' в следующих местах:")
+    logger.debug("Поиск статических файлов '$staticFolder' -> '$folderName' в следующих местах:")
     for (path in possiblePaths) {
         logger.debug("  - ${path.absolutePath} (exists: ${path.exists()}, isDirectory: ${path.isDirectory})")
         if (path.exists() && path.isDirectory) {
             val indexFile = File(path, "index.html")
             if (indexFile.exists()) {
-                logger.info("Найдена папка статических файлов: ${path.absolutePath}")
+                logger.info("✅ Найдена папка статических файлов: ${path.absolutePath}")
                 return path
+            } else {
+                logger.debug("    Папка найдена, но index.html отсутствует")
             }
         }
     }
 
+    logger.warn("❌ Папка статических файлов '$folderName' не найдена")
     return null
 }
 
@@ -103,6 +109,7 @@ fun generateCertificateIfNeeded() {
             jksPassword = "changeit"
         )
         LoggerFactory.getLogger("Application").info("SSL сертификат создан: ${certFile.absolutePath}")
+        LoggerFactory.getLogger("Application").warn("⚠️ SSL сертификат содержит только localhost/127.0.0.1 - для продакшена нужен настоящий SSL")
     }
 }
 
@@ -250,12 +257,15 @@ fun Application.module() {
 
     install(CallLogging) {
         level = Level.INFO
-        filter { call -> call.request.local.uri.startsWith("/api") }
+        filter { call ->
+            call.request.local.uri.startsWith("/api") ||
+                    call.request.local.uri.startsWith("/mcp")
+        }
     }
 
     install(WebSockets) {
-        pingPeriodMillis = 15000
-        timeoutMillis = 15000
+        pingPeriodMillis = 30000   // 30 секунд - сервер отправляет ping
+        timeoutMillis = 60000      // 60 секунд - таймаут для ответа на ping
         maxFrameSize = Long.MAX_VALUE
         masking = false
     }
@@ -273,8 +283,21 @@ fun Application.module() {
 
     // === Роутинг ===
     routing {
+        // DEBUG: Логируем ВСЕ запросы к /mcp/*
+        intercept(ApplicationCallPipeline.Call) {
+            if (call.request.local.uri.startsWith("/mcp/")) {
+                logger.warn("🔍 [DEBUG] Request to ${call.request.local.uri}")
+                logger.warn("   Method: ${call.request.local.method.value}")
+                logger.warn("   Headers: ${call.request.headers.names().joinToString { "$it=${call.request.headers[it]}" }}")
+                logger.warn("   Upgrade: ${call.request.headers["Upgrade"]}")
+                logger.warn("   Connection: ${call.request.headers["Connection"]}")
+            }
+        }
+
         // WebSocket для локальных агентов (ДОЛЖЕН БЫТЬ ПЕРВЫМ!)
         webSocket("/mcp/local-agent") {
+            logger.info("🔌 [WEBSOCKET] New WebSocket connection to /mcp/local-agent")
+            logger.info("   Headers: ${call.request.headers.names().map { "$it: ${call.request.headers[it]}" }}")
             LocalAgentManager.handleConnection(this)
         }
 
@@ -305,37 +328,27 @@ fun Application.module() {
         // WebSocket for real-time updates
         webSocketRoutes(webSocketService)
 
-        // Статические файлы (UI) - ДОЛЖНЫ БЫТЬ В КОНЦЕ!
+        // === БЕЗ КОРНЕВОГО РОУТА - ОН ПЕРЕХВАТЫВАЕТ WEBSOCKET ===
+
+        // Подготавливаем путь к UI для статических файлов
         val staticFolder = AppConfig.staticFolder
         val staticPath = resolveStaticPath(staticFolder, logger)
 
-        // Статические файлы для UI (ПОСЛЕ всех API роутов!)
-        if (staticPath != null && staticPath.exists() && staticPath.isDirectory) {
-            // Обслуживаем статические файлы, но они будут иметь низкий приоритет
-            // так как все API роуты уже зарегистрированы выше
-            staticFiles("/static", staticPath)
-
-            // Отдельный роут для index.html на корневом пути
-            get("/") {
+        // Главная страница (ПОСЛЕ WebSocket роутов, но ПЕРЕД catch-all)
+        get("/") {
+            if (staticPath != null && staticPath.exists() && staticPath.isDirectory) {
                 val indexFile = File(staticPath, "index.html")
                 if (indexFile.exists()) {
                     call.respondFile(indexFile)
                 } else {
-                    call.respondText("UI not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                    call.respondText("UI index.html не найден", ContentType.Text.Plain, HttpStatusCode.NotFound)
                 }
-            }
-
-            logger.info("Статические файлы доступны из: ${staticPath.absolutePath}")
-        } else {
-            logger.warn("Папка статических файлов не найдена: $staticFolder")
-
-            // Fallback для корневого URL
-            get("/") {
+            } else {
                 call.respondText(
                     """
                     <!DOCTYPE html>
                     <html>
-                    <head><title>KotlinAgent</title></head>
+                    <head><title>KotlinAgent API</title></head>
                     <body>
                         <h1>KotlinAgent API</h1>
                         <p>Сервер работает!</p>
@@ -345,13 +358,26 @@ fun Application.module() {
                             <li>POST /api/chat - Отправить сообщение Claude</li>
                             <li>GET /api/sessions - Список сессий</li>
                             <li><a href="/mcp/agents/status">GET /mcp/agents/status</a> - Статус локальных агентов</li>
+                            <li><a href="/ui">Web UI</a> - Веб интерфейс</li>
+                            <li>WebSocket: /mcp/local-agent</li>
                         </ul>
+                        <p><strong>⚠️ UI не найден:</strong> Папка '$staticFolder' не найдена</p>
                     </body>
                     </html>
                     """.trimIndent(),
                     ContentType.Text.Html
                 )
             }
+        }
+        // Статические файлы для UI (ПОСЛЕ всех API роутов и конкретных путей!)
+        if (staticPath != null && staticPath.exists() && staticPath.isDirectory) {
+            // Обслуживаем статические файлы по /ui пути - БЕЗ КОРНЕВОГО ПУТИ!
+            staticFiles("/ui", staticPath)
+
+            logger.info("✅ Статические файлы доступны из: ${staticPath.absolutePath}")
+            logger.info("✅ UI доступно по адресу: /ui (НЕ на корневом пути)")
+        } else {
+            logger.warn("❌ Папка статических файлов не найдена: $staticFolder")
         }
     }
 

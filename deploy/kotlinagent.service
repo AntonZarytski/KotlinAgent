@@ -9,7 +9,7 @@ WorkingDirectory=/home/agent/KotlinAgent
 EnvironmentFile=/home/agent/KotlinAgent/.env
 
 Environment=JAVA_OPTS="-Xmx512m"
-ExecStart=/usr/bin/java -jar /home/agent/KotlinAgent/app/build/libs/app.jar
+ExecStart=/usr/bin/java -jar /home/agent/KotlinAgent/remoteAgentServer/build/libs/remoteAgentServer.jar
 Restart=always
 RestartSec=5
 

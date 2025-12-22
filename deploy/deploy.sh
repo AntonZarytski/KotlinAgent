@@ -12,7 +12,17 @@ LOCAL_DIR="/Users/anton/IdeaProjects/KotlinAgent"
 APP_JAR="remoteAgentServer/build/libs/remoteAgentServer.jar"
 APP_PORT="8001"
 
+# SSH ControlMaster для переиспользования соединения
+SSH_CONTROL_PATH="/tmp/ssh-kotlinagent-deploy-%r@%h:%p"
+SSH_OPTS="-o ControlMaster=auto -o ControlPath=$SSH_CONTROL_PATH -o ControlPersist=10m"
+
 echo "=== Деплой KotlinAgent ==="
+
+# Функция для очистки SSH соединения при выходе
+cleanup_ssh() {
+    ssh $SSH_OPTS -O exit "$SERVER" 2>/dev/null || true
+}
+trap cleanup_ssh EXIT
 
 ### === 1. СБОРКА ЛОКАЛЬНО ===
 
@@ -33,7 +43,7 @@ echo ""
 ### === 2. ПОДГОТОВКА СЕРВЕРА ===
 
 echo "Шаг 2: Подготовка сервера..."
-ssh "$SERVER" << ENDSSH
+ssh $SSH_OPTS "$SERVER" << ENDSSH
 set -e
 mkdir -p \
   $REMOTE_DIR/remoteAgentServer/build/libs \
@@ -49,14 +59,14 @@ echo ""
 ### === 3. КОПИРОВАНИЕ ФАЙЛОВ ===
 
 echo "Шаг 3: Копирование файлов..."
-scp "$APP_JAR" "$SERVER:$REMOTE_DIR/remoteAgentServer/build/libs/"
-scp -r ui/ "$SERVER:$REMOTE_DIR/"
-scp -r deploy/ "$SERVER:$REMOTE_DIR/"
-scp -r scripts/ "$SERVER:$REMOTE_DIR/"
-scp .env "$SERVER:$REMOTE_DIR/"
+scp $SSH_OPTS "$APP_JAR" "$SERVER:$REMOTE_DIR/remoteAgentServer/build/libs/"
+scp $SSH_OPTS -r ui/ "$SERVER:$REMOTE_DIR/"
+scp $SSH_OPTS -r deploy/ "$SERVER:$REMOTE_DIR/"
+scp $SSH_OPTS -r scripts/ "$SERVER:$REMOTE_DIR/"
+scp $SSH_OPTS .env "$SERVER:$REMOTE_DIR/"
 
 # Делаем скрипты исполняемыми на сервере
-ssh "$SERVER" "chmod +x $REMOTE_DIR/scripts/*.sh $REMOTE_DIR/deploy/*.sh"
+ssh $SSH_OPTS "$SERVER" "chmod +x $REMOTE_DIR/scripts/*.sh $REMOTE_DIR/deploy/*.sh"
 
 echo "✅ Файлы скопированы"
 echo ""
@@ -64,7 +74,7 @@ echo ""
 ### === 4. ПРОВЕРКА .env ===
 
 echo "Шаг 4: Проверка .env..."
-ssh "$SERVER" << 'ENDSSH'
+ssh $SSH_OPTS "$SERVER" << 'ENDSSH'
 cd /home/agent/KotlinAgent
 if [ ! -f ".env" ]; then
     echo "❌ .env не найден"
@@ -79,11 +89,12 @@ echo ""
 
 echo "Шаг 5: Перезапуск приложения..."
 
-ssh "$SERVER" << 'ENDSSH'
+ssh $SSH_OPTS "$SERVER" << 'ENDSSH'
 set -e
 
 if systemctl list-unit-files | grep -q kotlinagent.service; then
     echo "Используем systemd"
+    # Используем sudo без пароля (требуется настройка sudoers)
     sudo systemctl restart kotlinagent
     sudo systemctl status kotlinagent --no-pager
 else
