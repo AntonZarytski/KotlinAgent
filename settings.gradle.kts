@@ -30,3 +30,4 @@ rootProject.name = "KotlinAgent"
 
 include("common")
 include("localAgentClient")
+include("rag")

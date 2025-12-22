@@ -9,6 +9,7 @@ sqlite = "3.47.2.0"
 logback = "1.5.14"
 dotenv = "6.4.2"
 compose = "1.6.10"
+pdfBox = "2.0.30"
 
 [libraries]
 kotlinGradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -45,6 +46,9 @@ sqliteJdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
 
 # Logging
 logback = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+
+# RAG
+pdfbox = { module = "org.apache.pdfbox:pdfbox", version = "pdfBox" }
 
 # Config
 dotenv = { module = "io.github.cdimascio:dotenv-kotlin", version.ref = "dotenv" }

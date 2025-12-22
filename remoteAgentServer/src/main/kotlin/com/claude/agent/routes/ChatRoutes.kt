@@ -85,7 +85,9 @@ fun Route.chatRoutes(
                 enabledTools = request.enabled_tools,
                 clientIp = clientIp,
                 userLocation = request.user_location,
-                sessionId = request.session_id
+                sessionId = request.session_id,
+                useRag = request.use_rag,
+                ragTopK = request.rag_top_k
             )
 
             // Обработка ошибок

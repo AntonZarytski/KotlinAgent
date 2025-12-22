@@ -38,7 +38,9 @@ class ClaudeClient(
     private val mcpTools: MCPTools,
     private val webSocketService: WebSocketService,
     private val tokenMetricsService: TokenMetricsService? = null,
-    private val toolsFilterService: ToolsFilterService? = null
+    private val toolsFilterService: ToolsFilterService? = null,
+    private val ragService: com.claude.agent.service.RagService? = null,
+    private val ollamaEmbeddingClient: com.claude.agent.service.OllamaEmbeddingClient? = null
 ) {
     private val logger = LoggerFactory.getLogger(ClaudeClient::class.java)
     private val apiKey = AppConfig.anthropicApiKey
@@ -80,11 +82,27 @@ class ClaudeClient(
         enabledTools: List<String> = emptyList(),
         clientIp: String? = null,
         userLocation: com.claude.agent.models.UserLocation? = null,
-        sessionId: String? = null
+        sessionId: String? = null,
+        useRag: Boolean = false,
+        ragTopK: Int = 3
     ): Triple<String?, TokenUsage?, String?> {
         try {
+            // Получаем RAG контекст если включен
+            val ragContext = if (useRag && ragService != null && ollamaEmbeddingClient != null) {
+                retrieveRagContext(userMessage, ragTopK)
+            } else {
+                null
+            }
+
             // Формируем системный промпт
-            val systemPrompt = SystemPrompts.getSystemPrompt(outputFormat = outputFormat, specMode = specMode, enabledTools = enabledTools)
+            var systemPrompt = SystemPrompts.getSystemPrompt(outputFormat = outputFormat, specMode = specMode, enabledTools = enabledTools)
+
+            // Добавляем RAG контекст в системный промпт если есть
+            if (ragContext != null && ragContext.isNotBlank()) {
+                systemPrompt = "$ragContext\n\n$systemPrompt"
+                logger.info("✅ RAG context added to system prompt (${ragContext.length} chars)")
+            }
+
             val cleanUserMessage = SystemPrompts.getUserMessage(userMessage)
 
             // Формируем массив сообщений с историей
@@ -591,4 +609,47 @@ class ClaudeClient(
     }
 
     fun isApiKeyConfigured(): Boolean = apiKey.isNotBlank()
+
+    /**
+     * Получение релевантного контекста из RAG базы данных
+     *
+     * @param query Запрос пользователя
+     * @param topK Количество наиболее релевантных чанков
+     * @return Отформатированный контекст для добавления в промпт
+     */
+    private suspend fun retrieveRagContext(query: String, topK: Int): String? {
+        return try {
+            if (ragService == null || ollamaEmbeddingClient == null) {
+                logger.warn("RAG services not configured")
+                return null
+            }
+
+            logger.info("🔍 Retrieving RAG context for query: ${query.take(100)}...")
+
+            // Генерируем embedding для запроса
+            val queryEmbedding = ollamaEmbeddingClient.embed(query)
+            logger.debug("Generated query embedding: ${queryEmbedding.size} dimensions")
+
+            // Ищем релевантные чанки
+            val results = ragService.search(
+                queryEmbedding = queryEmbedding,
+                topK = topK,
+                minSimilarity = 0.3  // Минимальный порог сходства
+            )
+
+            if (results.isEmpty()) {
+                logger.info("No relevant RAG context found")
+                return null
+            }
+
+            logger.info("Found ${results.size} relevant chunks (similarities: ${results.map { "%.3f".format(it.similarity) }})")
+
+            // Форматируем контекст
+            ragService.formatContext(results)
+
+        } catch (e: Exception) {
+            logger.error("Failed to retrieve RAG context: ${e.message}", e)
+            null
+        }
+    }
 }

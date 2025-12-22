@@ -43,7 +43,9 @@ data class ChatRequest(
     val spec_mode: Boolean = false,
     val conversation_history: List<Message> = emptyList(),
     val enabled_tools: List<String> = emptyList(),
-    val user_location: UserLocation? = null
+    val user_location: UserLocation? = null,
+    val use_rag: Boolean = false,           // Использовать RAG для контекста
+    val rag_top_k: Int = 3                  // Количество релевантных чанков
 )
 
 @Serializable

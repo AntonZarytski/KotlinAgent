@@ -28,9 +28,19 @@ class ReminderService(
     var mcpTools: MCPTools? = null
 
     fun startScheduler() {
-        logger.info("Reminder scheduler started")
+        logger.info("Reminder scheduler starting...")
+
+        // Проверяем что таблица reminders существует перед запуском планировщика
+        try {
+            conversationRepository.getReminders()
+            logger.info("✓ Таблица reminders доступна")
+        } catch (e: Exception) {
+            logger.error("✗ Таблица reminders не найдена. Планировщик не будет запущен.", e)
+            return
+        }
 
         scope.launch {
+            logger.info("Reminder scheduler started")
             while (isActive) {
                 try {
                     checkDueReminders()

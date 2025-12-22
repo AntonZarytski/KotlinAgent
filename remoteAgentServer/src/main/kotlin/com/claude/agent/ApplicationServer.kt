@@ -8,6 +8,7 @@ import com.claude.agent.database.DatabaseFactory
 import com.claude.agent.routes.chatRoutes
 import com.claude.agent.routes.healthRoutes
 import com.claude.agent.routes.metricsRoutes
+import com.claude.agent.routes.ragRoutes
 import com.claude.agent.routes.reminderRoutes
 import com.claude.agent.routes.sessionRoutes
 import com.claude.agent.routes.webSocketRoutes
@@ -29,6 +30,8 @@ import com.claude.agent.llm.mcp.local.WeatherMcp
 import com.claude.agent.llm.mcp.local.AndroidStudioLocalMcp
 import com.claude.agent.llm.mcp.remote.AirTicketsMcp
 import com.claude.agent.service.LocalAgentManager
+import com.claude.agent.service.OllamaEmbeddingClient
+import com.claude.agent.service.RagService
 import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.contentnegotiation.*
@@ -125,6 +128,11 @@ fun main() {
     // Инициализация базы данных
     DatabaseFactory.init()
 
+    // ВАЖНО: НЕ инициализируем RAG базу данных здесь!
+    // Exposed не поддерживает множественные подключения в одном процессе.
+    // RAG база данных инициализируется только в модуле :rag
+    // DatabaseFactory.initRagDatabase("rag_index.db")
+
     // Генерация SSL сертификата если его нет
     generateCertificateIfNeeded()
 
@@ -210,13 +218,31 @@ fun Application.module() {
     val tokenMetricsService = TokenMetricsService()
     val toolsFilterService = ToolsFilterService()
 
+    // === Инициализация RAG сервисов (опционально) ===
+    val ragService = try {
+        // Используем путь относительно корня проекта (на уровень выше remoteAgentServer/)
+        RagService(ragDatabasePath = "../rag_index.db")
+    } catch (e: Exception) {
+        logger.warn("RAG service initialization failed: ${e.message}")
+        null
+    }
+
+    val ollamaEmbeddingClient = try {
+        OllamaEmbeddingClient(httpClient = httpClient)
+    } catch (e: Exception) {
+        logger.warn("Ollama embedding client initialization failed: ${e.message}")
+        null
+    }
+
     val mcpTools = MCPTools(localMcpProvider = localMcpProvider, remoteMcpProvider = remoteMcpProvider)
     val claudeClient = ClaudeClient(
         httpClient = httpClient,
         mcpTools = mcpTools,
         webSocketService = webSocketService,
         tokenMetricsService = tokenMetricsService,
-        toolsFilterService = toolsFilterService
+        toolsFilterService = toolsFilterService,
+        ragService = ragService,
+        ollamaEmbeddingClient = ollamaEmbeddingClient
     )
     val historyCompressor = HistoryCompressor(claudeClient, tokenMetricsService)
 
@@ -321,6 +347,9 @@ fun Application.module() {
 
         // Reminder management
         reminderRoutes(reminderService)
+
+        // RAG endpoints
+        ragRoutes(ragService, ollamaEmbeddingClient)
 
         // Token metrics
         metricsRoutes(tokenMetricsService)

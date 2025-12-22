@@ -12,6 +12,10 @@ repositories {
 
 dependencies {
     implementation(libs.bundles.kotlinxEcosystem)
+
+    // Exposed ORM for shared database models
+    implementation(libs.bundles.exposed)
+    implementation(libs.sqliteJdbc)
 }
 
 tasks.test {

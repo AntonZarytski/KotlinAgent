@@ -22,11 +22,19 @@ import org.slf4j.LoggerFactory
 class ConversationRepository {
     private val logger = LoggerFactory.getLogger(ConversationRepository::class.java)
 
+    /**
+     * Вспомогательная функция для выполнения транзакций с явным указанием основной БД
+     * Это необходимо, когда в приложении используется несколько баз данных (например, RAG)
+     */
+    private fun <T> mainDbTransaction(statement: org.jetbrains.exposed.sql.Transaction.() -> T): T {
+        return transaction(DatabaseFactory.getMainDatabase(), statement)
+    }
+
     // === Сессии ===
 
     fun createSession(sessionId: String, title: String = "Новый диалог"): Boolean {
         return try {
-            transaction {
+            mainDbTransaction {
                 val now = Instant.now().toString()
                 Sessions.insert {
                     it[id] = sessionId
@@ -44,7 +52,7 @@ class ConversationRepository {
     }
 
     fun getAllSessions(): List<SessionInfo> {
-        return transaction {
+        return mainDbTransaction {
             Sessions.selectAll()
                 .orderBy(Sessions.lastUpdated, SortOrder.DESC)
                 .map { row ->
@@ -60,7 +68,7 @@ class ConversationRepository {
 
     fun deleteSession(sessionId: String): Boolean {
         return try {
-            transaction {
+            mainDbTransaction {
                 // CASCADE удалит все сообщения автоматически
                 Sessions.deleteWhere { Sessions.id eq sessionId }
                 logger.info("Сессия удалена: $sessionId")
@@ -83,7 +91,7 @@ class ConversationRepository {
         read: Boolean = false
     ): Message? {
         return try {
-            transaction {
+            mainDbTransaction {
                 val now = Instant.now().toString()
 
                 // Сохраняем сообщение
@@ -122,7 +130,7 @@ class ConversationRepository {
     }
 
     fun getSessionHistory(sessionId: String, limit: Int? = null): List<Message> {
-        return transaction {
+        return mainDbTransaction {
             var query = Messages.selectAll().where { Messages.sessionId eq sessionId }
                 .orderBy(Messages.timestamp, SortOrder.ASC)
 
@@ -148,7 +156,7 @@ class ConversationRepository {
     }
 
     fun getSessionStats(sessionId: String): SessionStats {
-        return transaction {
+        return mainDbTransaction {
             val messages = Messages.selectAll().where { Messages.sessionId eq sessionId }
                 .map { it[Messages.role] }
 
@@ -167,7 +175,7 @@ class ConversationRepository {
     // === Работа с непрочитанными сообщениями ===
 
     fun getUnreadCount(sessionId: String): Int {
-        return transaction {
+        return mainDbTransaction {
             Messages.selectAll()
                 .where { (Messages.sessionId eq sessionId) and (Messages.read eq false) }
                 .count()
@@ -176,7 +184,7 @@ class ConversationRepository {
     }
 
     fun markMessagesAsRead(sessionId: String): Int {
-        return transaction {
+        return mainDbTransaction {
             Messages.update({ (Messages.sessionId eq sessionId) and (Messages.read eq false) }) {
                 it[read] = true
             }
@@ -184,7 +192,7 @@ class ConversationRepository {
     }
 
     fun getUnreadCountsForAllSessions(): Map<String, Int> {
-        return transaction {
+        return mainDbTransaction {
             Messages.selectAll()
                 .where { Messages.read eq false }
                 .groupBy { it[Messages.sessionId] }
@@ -193,7 +201,7 @@ class ConversationRepository {
     }
 
     fun getReminders(): List<Reminder> {
-        return transaction {
+        return mainDbTransaction {
             Reminders.selectAll().map { row ->
                 Reminder(
                     id = row[Reminders.id],
@@ -216,7 +224,7 @@ class ConversationRepository {
 
     fun createReminder(reminder: Reminder): Boolean {
         return try {
-            transaction {
+            mainDbTransaction {
                 val now = Instant.now().toString()
                 Reminders.insert {
                     it[id] = reminder.id
@@ -244,7 +252,7 @@ class ConversationRepository {
 
     fun deleteReminder(reminderId: String): Boolean {
         return try {
-            transaction {
+            mainDbTransaction {
                 Reminders.deleteWhere { Reminders.id eq reminderId }
                 logger.info("Reminder удален: $reminderId")
                 true
@@ -257,7 +265,7 @@ class ConversationRepository {
 
     fun checkDueReminders(): List<Reminder> {
         val now = Instant.now()
-        return transaction {
+        return mainDbTransaction {
             Reminders
                 .selectAll().where { (Reminders.done eq false) and (Reminders.notified eq false) }
                 .mapNotNull {
@@ -295,7 +303,7 @@ class ConversationRepository {
     }
 
     fun markNotified(id: String) {
-        transaction {
+        mainDbTransaction {
             logger.info("Напоминание отмечено как уведомленное: $id")
             Reminders.update({ Reminders.id eq id }) {
                 it[notified] = true
