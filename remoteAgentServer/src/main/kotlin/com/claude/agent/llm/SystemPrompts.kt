@@ -114,7 +114,7 @@ object SystemPrompts {
      * @param specMode Режим сбора уточняющих данных (true/false)
      * @return Склеенный системный промпт
      */
-    fun getSystemPrompt(outputFormat: String, enabledTools: List<String>, specMode: Boolean = false): String {
+    fun getSystemPrompt(outputFormat: String, enabledTools: List<String>, specMode: Boolean = false, isRagEnabled: Boolean): String {
         // Получаем текущее время с часовым поясом
         val currentTime = ZonedDateTime.now()
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
@@ -126,7 +126,7 @@ object SystemPrompts {
         // Добавляем текущее время
         basePrompt = """Текущее время: $formattedTime
 
-$basePrompt"""
+        $basePrompt"""
         if (enabledTools.isNotEmpty()) {
             var toolsPrompt = "Доступны инструменты:"
             enabledTools.forEach { toolName ->
@@ -177,6 +177,12 @@ $basePrompt"""
                - Если нет координат — попроси город
             """
             basePrompt += "\n$toolsPrompt"
+        }
+
+        if (isRagEnabled) {
+            val ragPrompt = "Вы — помощник, который отвечает на вопросы, используя предоставленный контекст.\n" +
+                    "Если контекст не содержит ответа — скажите «В моей базе нет таких данных»"
+            basePrompt += "\n$ragPrompt"
         }
 
         // Выбираем инструкции по формату

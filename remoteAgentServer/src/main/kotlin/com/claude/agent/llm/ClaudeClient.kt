@@ -89,25 +89,30 @@ class ClaudeClient(
     ): Triple<String?, TokenUsage?, String?> {
         try {
             // Получаем RAG контекст если включен
-            val ragContext = if (useRag && ragService != null && ollamaEmbeddingClient != null) {
+            logger.info("Rag enabled: $useRag")
+            logger.info("RagService enabled: ${ragService != null}")
+            logger.info("OllamaEmbeddingClient enabled: ${ollamaEmbeddingClient != null}")
+
+            val isRagEnabled = useRag && ragService != null && ollamaEmbeddingClient != null
+            logger.info("Rag result isEnabled: $isRagEnabled")
+
+            val ragContext = if (isRagEnabled) {
                 retrieveRagContext(userMessage, ragTopK)
             } else {
                 null
             }
 
             // Формируем системный промпт
-            var systemPrompt = SystemPrompts.getSystemPrompt(outputFormat = outputFormat, specMode = specMode, enabledTools = enabledTools)
-
-            // Добавляем RAG контекст в системный промпт если есть
-            if (ragContext != null && ragContext.isNotBlank()) {
-                systemPrompt = "$ragContext\n\n$systemPrompt"
-                logger.info("✅ RAG context added to system prompt (${ragContext.length} chars)")
-            }
+            val systemPrompt = SystemPrompts.getSystemPrompt(outputFormat = outputFormat, specMode = specMode, enabledTools = enabledTools, isRagEnabled = isRagEnabled)
 
             val cleanUserMessage = SystemPrompts.getUserMessage(userMessage)
 
             // Формируем массив сообщений с историей
-            val messages = buildMessages(conversationHistory, cleanUserMessage)
+            val messages = buildMessages(
+                history = conversationHistory,
+                userMessage = cleanUserMessage,
+                ragContext = ragContext
+            )
 
             mcpTools.enableServers(enabledTools)
             // Получаем remote MCP серверы
@@ -483,7 +488,7 @@ class ClaudeClient(
         return Pair(finalText, usage)
     }
 
-    private fun buildMessages(history: List<Message>, userMessage: String): List<JsonObject> {
+    private fun buildMessages(history: List<Message>, userMessage: String, ragContext: String?): List<JsonObject> {
         val messages = mutableListOf<JsonObject>()
 
         // Добавляем историю
@@ -496,10 +501,16 @@ class ClaudeClient(
             }
         }
 
+        // Добавляем RAG контекст в системный промпт если есть
+        if (ragContext != null && ragContext.isNotBlank()) {
+            logger.info("✅ RAG context added to system prompt (${ragContext.length} chars)")
+        }
+
         // Добавляем текущее сообщение
+        val messageAndRag = "$userMessage\n\n$ragContext"
         messages.add(JsonObject(mapOf(
             "role" to JsonPrimitive("user"),
-            "content" to JsonPrimitive(userMessage)
+            "content" to JsonPrimitive(messageAndRag)
         )))
 
         return messages

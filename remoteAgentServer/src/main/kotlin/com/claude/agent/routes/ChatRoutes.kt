@@ -138,9 +138,8 @@ fun Route.chatRoutes(
 
             logger.info("Подсчёт токенов: format=${request.output_format}, spec=${request.spec_mode}, " +
                     "history_len=${request.conversation_history.size}")
-
             // Формируем системный промпт и сообщения
-            val systemPrompt = SystemPrompts.getSystemPrompt(outputFormat = request.output_format, specMode = request.spec_mode, enabledTools = emptyList())
+            val systemPrompt = SystemPrompts.getSystemPrompt(outputFormat = request.output_format, specMode = request.spec_mode, enabledTools = emptyList(), isRagEnabled = false)
             val messages = mutableListOf<Message>()
             messages.addAll(request.conversation_history)
             messages.add(Message("user", request.message))
