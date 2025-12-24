@@ -26,13 +26,26 @@ object DatabaseFactory {
      */
     fun getMainDatabase(): Database {
         if (!::mainDatabase.isInitialized) {
-            logger.error("mainDatabase не инициализирован! Вызовите DatabaseFactory.init() перед использованием.")
-            throw IllegalStateException("Database not initialized. Call DatabaseFactory.init() first.")
+            logger.warn("mainDatabase не инициализирован! Попытка повторной инициализации...")
+            // Попытка повторной инициализации (на случай race condition)
+            try {
+                init()
+                logger.info("✅ Database initialized successfully on retry")
+            } catch (e: Exception) {
+                logger.error("❌ Failed to initialize database on retry: ${e.message}")
+                throw IllegalStateException("Database not initialized. Call DatabaseFactory.init() first.", e)
+            }
         }
         return mainDatabase
     }
 
     fun init() {
+        // Проверка: если уже инициализирована, не делаем повторно
+        if (::mainDatabase.isInitialized) {
+            logger.debug("Database already initialized, skipping re-initialization")
+            return
+        }
+
         val databasePath = AppConfig.databasePath
         val jdbcUrl = "jdbc:sqlite:$databasePath"
 

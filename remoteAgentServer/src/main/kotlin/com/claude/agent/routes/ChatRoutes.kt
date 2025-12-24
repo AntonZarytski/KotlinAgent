@@ -87,7 +87,9 @@ fun Route.chatRoutes(
                 userLocation = request.user_location,
                 sessionId = request.session_id,
                 useRag = request.use_rag,
-                ragTopK = request.rag_top_k
+                ragTopK = request.rag_top_k,
+                ragMinSimilarity = request.rag_min_similarity,
+                ragFilterEnabled = request.rag_filter_enabled
             )
 
             // Обработка ошибок

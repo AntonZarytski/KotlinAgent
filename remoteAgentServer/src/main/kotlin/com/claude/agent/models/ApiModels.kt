@@ -45,7 +45,9 @@ data class ChatRequest(
     val enabled_tools: List<String> = emptyList(),
     val user_location: UserLocation? = null,
     val use_rag: Boolean = false,           // Использовать RAG для контекста
-    val rag_top_k: Int = 3                  // Количество релевантных чанков
+    val rag_top_k: Int = 3,                 // Количество релевантных чанков
+    val rag_min_similarity: Double = 0.3,   // Минимальный порог схожести (0.0-1.0)
+    val rag_filter_enabled: Boolean = true  // Включить фильтрацию по порогу
 )
 
 @Serializable

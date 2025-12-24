@@ -2030,6 +2030,44 @@
                 </label>
             </div>
 
+            <!-- RAG Filter Settings (показывается только когда RAG включен) -->
+            <div class="setting-group" id="ragFilterSettings" style="display: none;">
+                <label>🎚️ Настройки RAG фильтрации</label>
+
+                <!-- Enable/Disable Filtering Checkbox -->
+                <label class="checkbox-container">
+                    <input type="checkbox" id="ragFilterEnabledCheckbox" checked>
+                    <div>
+                        <div class="checkbox-label">Включить фильтрацию по порогу</div>
+                        <div class="checkbox-desc">Фильтровать результаты по коэффициенту схожести (отключить для A/B тестирования)</div>
+                    </div>
+                </label>
+
+                <!-- Min Similarity Slider -->
+                <div class="slider-container" id="ragMinSimilaritySliderContainer" style="margin-top: 15px;">
+                    <label style="margin-bottom: 8px; display: block; font-weight: 500;">Минимальная схожесть</label>
+                    <div class="slider-value">
+                        <span>0.0</span>
+                        <span class="current-value" id="ragMinSimilarityValue">0.3</span>
+                        <span>1.0</span>
+                    </div>
+                    <input type="range" id="ragMinSimilaritySlider" min="0" max="1" step="0.05" value="0.3">
+                    <p class="setting-hint">Минимальный порог cosine similarity (выше = строже фильтрация)</p>
+                </div>
+
+                <!-- Top-K Slider -->
+                <div class="slider-container" id="ragTopKSliderContainer" style="margin-top: 15px;">
+                    <label style="margin-bottom: 8px; display: block; font-weight: 500;">Количество результатов (Top-K)</label>
+                    <div class="slider-value">
+                        <span>1</span>
+                        <span class="current-value" id="ragTopKValue">3</span>
+                        <span>10</span>
+                    </div>
+                    <input type="range" id="ragTopKSlider" min="1" max="10" step="1" value="3">
+                    <p class="setting-hint">Максимальное количество релевантных чанков документов</p>
+                </div>
+            </div>
+
             <!-- Отправлять историю -->
             <div class="setting-group">
                 <label>💬 История диалога</label>
@@ -2152,6 +2190,13 @@
     const specModeCheckbox = document.getElementById('specMode');
     const settingsPanel = document.getElementById('settingsPanel');
     const useRagCheckbox = document.getElementById('useRagCheckbox');
+    const ragFilterSettings = document.getElementById('ragFilterSettings');
+    const ragFilterEnabledCheckbox = document.getElementById('ragFilterEnabledCheckbox');
+    const ragMinSimilaritySlider = document.getElementById('ragMinSimilaritySlider');
+    const ragMinSimilarityValue = document.getElementById('ragMinSimilarityValue');
+    const ragTopKSlider = document.getElementById('ragTopKSlider');
+    const ragTopKValue = document.getElementById('ragTopKValue');
+    const ragMinSimilaritySliderContainer = document.getElementById('ragMinSimilaritySliderContainer');
     const sendHistoryCheckbox = document.getElementById('sendHistoryCheckbox');
     const temperatureSlider = document.getElementById('temperature');
     const temperatureValue = document.getElementById('temperatureValue');
@@ -3418,6 +3463,40 @@ ${toolData.tool_result}
       temperatureValue.textContent = parseFloat(temperatureSlider.value).toFixed(1);
     });
 
+    // RAG Filter Settings Event Listeners
+
+    // Toggle RAG filter settings visibility when RAG checkbox changes
+    useRagCheckbox.addEventListener('change', () => {
+      if (useRagCheckbox.checked) {
+        ragFilterSettings.style.display = 'block';
+      } else {
+        ragFilterSettings.style.display = 'none';
+      }
+    });
+
+    // Toggle slider disabled state when filter checkbox changes
+    ragFilterEnabledCheckbox.addEventListener('change', () => {
+      const isEnabled = ragFilterEnabledCheckbox.checked;
+      ragMinSimilaritySlider.disabled = !isEnabled;
+
+      // Visual feedback
+      if (isEnabled) {
+        ragMinSimilaritySliderContainer.style.opacity = '1';
+      } else {
+        ragMinSimilaritySliderContainer.style.opacity = '0.5';
+      }
+    });
+
+    // Update similarity slider value display
+    ragMinSimilaritySlider.addEventListener('input', () => {
+      ragMinSimilarityValue.textContent = parseFloat(ragMinSimilaritySlider.value).toFixed(2);
+    });
+
+    // Update top-K slider value display
+    ragTopKSlider.addEventListener('input', () => {
+      ragTopKValue.textContent = ragTopKSlider.value;
+    });
+
     // Автоматическое изменение высоты textarea
     function autoResizeTextarea() {
       input.style.height = 'auto';
@@ -3444,7 +3523,10 @@ ${toolData.tool_result}
         max_tokens: parseInt(maxTokensSlider.value, 10),
         spec_mode: specModeCheckbox.checked,
         temperature: parseFloat(temperatureSlider.value),
-        use_rag: useRagCheckbox.checked
+        use_rag: useRagCheckbox.checked,
+        rag_top_k: parseInt(ragTopKSlider.value, 10),
+        rag_min_similarity: parseFloat(ragMinSimilaritySlider.value),
+        rag_filter_enabled: ragFilterEnabledCheckbox.checked
       };
     }
 
@@ -3655,7 +3737,9 @@ ${toolData.tool_result}
           conversation_history: historyToSend,
           enabled_tools: enabledTools,
           use_rag: settings.use_rag,
-          rag_top_k: 3
+          rag_top_k: settings.rag_top_k,
+          rag_min_similarity: settings.rag_min_similarity,
+          rag_filter_enabled: settings.rag_filter_enabled
         };
 
         // Добавляем координаты, если они есть

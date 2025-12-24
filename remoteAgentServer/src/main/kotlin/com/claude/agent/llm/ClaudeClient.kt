@@ -85,7 +85,9 @@ class ClaudeClient(
         userLocation: com.claude.agent.models.UserLocation? = null,
         sessionId: String? = null,
         useRag: Boolean = false,
-        ragTopK: Int = 3
+        ragTopK: Int = 3,
+        ragMinSimilarity: Double = 0.3,
+        ragFilterEnabled: Boolean = true
     ): Triple<String?, TokenUsage?, String?> {
         try {
             // Получаем RAG контекст если включен
@@ -97,7 +99,12 @@ class ClaudeClient(
             logger.info("Rag result isEnabled: $isRagEnabled")
 
             val ragContext = if (isRagEnabled) {
-                retrieveRagContext(userMessage, ragTopK)
+                retrieveRagContext(
+                    query = userMessage,
+                    topK = ragTopK,
+                    minSimilarity = ragMinSimilarity,
+                    filterEnabled = ragFilterEnabled
+                )
             } else {
                 null
             }
@@ -501,17 +508,36 @@ class ClaudeClient(
             }
         }
 
-        // Добавляем RAG контекст в системный промпт если есть
+        // Добавляем текущее сообщение с RAG контекстом (если есть)
         if (ragContext != null && ragContext.isNotBlank()) {
-            logger.info("✅ RAG context added to system prompt (${ragContext.length} chars)")
-        }
+            logger.info("✅ Adding RAG context as separate content block with caching (${ragContext.length} chars)")
 
-        // Добавляем текущее сообщение
-        val messageAndRag = "$userMessage\n\n$ragContext"
-        messages.add(JsonObject(mapOf(
-            "role" to JsonPrimitive("user"),
-            "content" to JsonPrimitive(messageAndRag)
-        )))
+            // Используем content blocks: RAG контекст + вопрос пользователя
+            messages.add(JsonObject(mapOf(
+                "role" to JsonPrimitive("user"),
+                "content" to JsonArray(listOf(
+                    // Блок 1: RAG контекст с кешированием
+                    JsonObject(mapOf(
+                        "type" to JsonPrimitive("text"),
+                        "text" to JsonPrimitive(ragContext),
+                        "cache_control" to JsonObject(mapOf(
+                            "type" to JsonPrimitive("ephemeral")
+                        ))
+                    )),
+                    // Блок 2: Вопрос пользователя
+                    JsonObject(mapOf(
+                        "type" to JsonPrimitive("text"),
+                        "text" to JsonPrimitive(userMessage)
+                    ))
+                ))
+            )))
+        } else {
+            // Без RAG - обычное сообщение
+            messages.add(JsonObject(mapOf(
+                "role" to JsonPrimitive("user"),
+                "content" to JsonPrimitive(userMessage)
+            )))
+        }
 
         return messages
     }
@@ -627,9 +653,16 @@ class ClaudeClient(
      *
      * @param query Запрос пользователя
      * @param topK Количество наиболее релевантных чанков
+     * @param minSimilarity Минимальный порог схожести (0.0-1.0)
+     * @param filterEnabled Включить фильтрацию по порогу (false для A/B тестирования)
      * @return Отформатированный контекст для добавления в промпт
      */
-    private suspend fun retrieveRagContext(query: String, topK: Int): String? {
+    private suspend fun retrieveRagContext(
+        query: String,
+        topK: Int,
+        minSimilarity: Double = 0.3,
+        filterEnabled: Boolean = true
+    ): String? {
         return try {
             if (ragService == null || ollamaEmbeddingClient == null) {
                 logger.warn("RAG services not configured")
@@ -647,10 +680,14 @@ class ClaudeClient(
             logger.debug("Normalized query embedding to [0,1] range")
 
             // Ищем релевантные чанки
+            // Если фильтрация отключена, устанавливаем порог в 0.0 для получения всех результатов
+            val effectiveMinSimilarity = if (filterEnabled) minSimilarity else 0.0
+            logger.info("RAG filtering: enabled=$filterEnabled, threshold=$effectiveMinSimilarity, topK=$topK")
+
             val results = ragService.search(
                 queryEmbedding = normalizedQueryEmbedding,
                 topK = topK,
-                minSimilarity = 0.3  // Минимальный порог сходства
+                minSimilarity = effectiveMinSimilarity
             )
 
             if (results.isEmpty()) {

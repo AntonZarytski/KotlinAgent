@@ -61,7 +61,7 @@ class RagService(
     fun search(
         queryEmbedding: FloatArray,
         topK: Int = 5,
-        minSimilarity: Double = 0.0
+        minSimilarity: Double = 0.9
     ): List<SearchResult> {
         // ВАЖНО: Используем явное подключение к RAG базе данных
         return transaction(ragDatabase) {
