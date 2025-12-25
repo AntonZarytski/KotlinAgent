@@ -25,6 +25,7 @@ class AndroidStudioLocalMcp : Mcp.Local {
         first = ANDROID_STUDIO_MCP,
         second = LocalToolDefinition(
             name = ANDROID_STUDIO_MCP,
+            ui_description = "Этот инструмент управляет Android Studio, Android Emulator, ADB, Gradle и ЛОКАЛЬНОЙ ФАЙЛОВОЙ СИСТЕМОЙ на ПОДКЛЮЧЁННОМ КОМПЬЮТЕРЕ РАЗРАБОТЧИКА.",
             description = """
             Этот инструмент управляет Android Studio, Android Emulator, ADB, Gradle и ЛОКАЛЬНОЙ ФАЙЛОВОЙ СИСТЕМОЙ
             на ПОДКЛЮЧЁННОМ КОМПЬЮТЕРЕ РАЗРАБОТЧИКА (не на сервере).

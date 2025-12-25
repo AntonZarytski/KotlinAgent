@@ -47,7 +47,7 @@ fun Route.healthRoutes(claudeClient: ClaudeClient, mcpTools: MCPTools) {
             val localToolsList = localTools.map { tool ->
                 ToolInfo(
                     name = tool.name,
-                    description = tool.description,
+                    description = tool.ui_description,
                     type = "local"
                 )
             }

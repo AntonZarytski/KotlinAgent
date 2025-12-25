@@ -17,6 +17,7 @@ class ActionPlannerMcp() : Mcp.Local {
         first = ACTION_PLANNER,
         second = LocalToolDefinition(
             name = ACTION_PLANNER,
+            ui_description = "Планировщик действий агента для СЛОЖНЫХ МНОГОШАГОВЫХ задач.",
             description = """
             Планировщик действий агента для СЛОЖНЫХ МНОГОШАГОВЫХ задач.
 

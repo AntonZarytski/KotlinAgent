@@ -26,6 +26,16 @@ import kotlinx.serialization.encodeToString
 import org.slf4j.LoggerFactory
 
 /**
+ * Результат отправки сообщения Claude
+ */
+data class ClaudeResponse(
+    val reply: String?,
+    val usage: TokenUsage?,
+    val error: String?,
+    val intermediateMessages: List<Message> = emptyList()
+)
+
+/**
  * Клиент для работы с Claude API (Anthropic).
  *
  * Улучшенная версия с поддержкой:
@@ -84,11 +94,12 @@ class ClaudeClient(
         clientIp: String? = null,
         userLocation: com.claude.agent.models.UserLocation? = null,
         sessionId: String? = null,
+        showIntermediateMessages: Boolean = true,
         useRag: Boolean = false,
         ragTopK: Int = 3,
         ragMinSimilarity: Double = 0.3,
         ragFilterEnabled: Boolean = true
-    ): Triple<String?, TokenUsage?, String?> {
+    ): ClaudeResponse {
         try {
             // Получаем RAG контекст если включен
             logger.info("Rag enabled: $useRag")
@@ -173,7 +184,12 @@ class ClaudeClient(
             if (!response.status.isSuccess()) {
                 val errorBody = response.bodyAsText()
                 logger.error("Ошибка API: ${response.status}, body: $errorBody")
-                return Triple(null, null, "Ошибка Claude API: ${response.status}")
+                return ClaudeResponse(
+                    reply = null,
+                    usage = null,
+                    error = "Ошибка Claude API: ${response.status}",
+                    intermediateMessages = emptyList()
+                )
             }
 
             val responseBody = response.body<JsonObject>()
@@ -193,7 +209,7 @@ class ClaudeClient(
             }
 
             // Обрабатываем ответ (с поддержкой tool_use)
-            val (finalReply, totalUsage) = handleResponse(
+            val (finalReply, totalUsage, intermediateMessages) = handleResponse(
                 responseBody = responseBody,
                 initialMessages = messages,
                 model = model,
@@ -204,7 +220,8 @@ class ClaudeClient(
                 remoteMcp = remoteMcpParams,
                 clientIp = clientIp,
                 userLocation = userLocation,
-                sessionId = sessionId
+                sessionId = sessionId,
+                collectIntermediateMessages = showIntermediateMessages
             )
 
             logger.info("Ответ получен за ${elapsed}ms")
@@ -219,11 +236,21 @@ class ClaudeClient(
                 )
             }
 
-            return Triple(finalReply, totalUsage, null)
+            return ClaudeResponse(
+                reply = finalReply,
+                usage = totalUsage,
+                error = null,
+                intermediateMessages = intermediateMessages
+            )
 
         } catch (e: Exception) {
             logger.error("Ошибка sendMessage: ${e.message}", e)
-            return Triple(null, null, "Ошибка сервера: ${e.message}")
+            return ClaudeResponse(
+                reply = null,
+                usage = null,
+                error = "Ошибка сервера: ${e.message}",
+                intermediateMessages = emptyList()
+            )
         }
     }
 
@@ -241,13 +268,15 @@ class ClaudeClient(
         remoteMcp: JsonArray,
         clientIp: String?,
         userLocation: com.claude.agent.models.UserLocation?,
-        sessionId: String?
-    ): Pair<String, TokenUsage> {
+        sessionId: String?,
+        collectIntermediateMessages: Boolean = true
+    ): Triple<String, TokenUsage, List<Message>> {
         var currentResponse = responseBody
         val messages = initialMessages.toMutableList()
         var totalInputTokens = currentResponse["usage"]?.jsonObject?.get("input_tokens")?.jsonPrimitive?.int ?: 0
         var totalOutputTokens = currentResponse["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.int ?: 0
 
+        val intermediateMessages = mutableListOf<Message>()
         var iteration = 0
 
         // Детекция зацикливания: отслеживаем последние вызовы инструментов
@@ -284,15 +313,26 @@ class ClaudeClient(
                 // после выполнения всех инструментов. Возвращаем сообщение по умолчанию.
                 if (finalText.isBlank()) {
                     logger.warn("Claude returned empty text response after tool execution. Iteration: $iteration")
-                    return Pair("✅ Задача выполнена", usage)
+                    return Triple("✅ Задача выполнена", usage, intermediateMessages)
                 }
 
-                return Pair(finalText, usage)
+                return Triple(finalText, usage, intermediateMessages)
             }
 
             // Есть tool_use - обрабатываем
             iteration++
             val currentText = textBlocks.joinToString("")
+
+            // Собираем промежуточное сообщение если включено
+            if (collectIntermediateMessages && currentText.isNotBlank()) {
+                intermediateMessages.add(
+                    Message(
+                        role = "assistant",
+                        content = currentText,
+                        timestamp = java.time.Instant.now().toString()
+                    )
+                )
+            }
 
             // Извлекаем имена вызываемых инструментов для детекции зацикливания
             val toolNames = content
@@ -483,16 +523,17 @@ class ClaudeClient(
         // Если после лимита итераций текст пустой, возвращаем сообщение по умолчанию
         if (finalText.isBlank()) {
             logger.warn("Claude не вернул текстовый ответ после достижения лимита итераций")
-            return Pair(
+            return Triple(
                 "⚠️ Достигнут лимит итераций ($MAX_TOOL_ITERATIONS). " +
                 "Выполнено инструментов: ${recentToolCalls.size}. " +
                 "Возможно, задача не завершена полностью. " +
                 "Попробуйте переформулировать запрос или разбить на более мелкие задачи.",
-                usage
+                usage,
+                intermediateMessages
             )
         }
 
-        return Pair(finalText, usage)
+        return Triple(finalText, usage, intermediateMessages)
     }
 
     private fun buildMessages(history: List<Message>, userMessage: String, ragContext: String?): List<JsonObject> {

@@ -27,48 +27,103 @@ class ReminderService(
     var claudeClient: ClaudeClient? = null
     var mcpTools: MCPTools? = null
 
-    fun startScheduler() {
-        logger.info("Reminder scheduler starting...")
+    // Map of reminder ID to its timer job
+    private val reminderTimers = mutableMapOf<String, Job>()
+    private val timersLock = Any()
 
-        // Проверяем что таблица reminders существует перед запуском планировщика
-        try {
-            conversationRepository.getReminders()
-            logger.info("✓ Таблица reminders доступна")
-        } catch (e: Exception) {
-            logger.error("✗ Таблица reminders не найдена. Планировщик не будет запущен.", e)
+    /**
+     * Запускает индивидуальные таймеры для всех существующих напоминаний.
+     * Вызывается при старте приложения.
+     */
+    fun startScheduler() {
+        val activeReminders = conversationRepository.getReminders()
+        if (activeReminders.isEmpty()) {
+            logger.info("No active reminders to schedule")
             return
         }
 
-        scope.launch {
-            logger.info("Reminder scheduler started")
-            while (isActive) {
-                try {
-                    checkDueReminders()
-                } catch (e: Exception) {
-                    logger.error("Scheduler error: ${e.message}", e)
+        logger.info("Scheduling ${activeReminders.size} active reminders with individual timers")
+
+        activeReminders.forEach { reminder ->
+            scheduleReminder(reminder)
+        }
+    }
+
+    /**
+     * Создает индивидуальный таймер для конкретного напоминания.
+     * Таймер запустится точно в момент due_at.
+     */
+    private fun scheduleReminder(reminder: Reminder) {
+        synchronized(timersLock) {
+            // Отменяем существующий таймер если есть
+            reminderTimers[reminder.id]?.cancel()
+
+            val dueAt = try {
+                Instant.parse(reminder.due_at)
+            } catch (e: Exception) {
+                logger.error("Invalid due_at format for reminder ${reminder.id}: ${reminder.due_at}")
+                return
+            }
+
+            val now = Instant.now()
+            val delayMillis = dueAt.toEpochMilli() - now.toEpochMilli()
+
+            if (delayMillis < 0) {
+                // Напоминание просрочено - выполнить немедленно
+                logger.info("Reminder ${reminder.id} is overdue, executing immediately")
+                scope.launch {
+                    executeReminder(reminder)
                 }
-                delay(1_000) // проверка каждую секунду
+                return
+            }
+
+            // Создаем таймер который запустится в нужное время
+            val timerJob = scope.launch {
+                try {
+                    logger.info("Timer scheduled for reminder '${reminder.text}' (ID: ${reminder.id}) to fire in ${delayMillis / 1000} seconds")
+                    delay(delayMillis)
+
+                    // Время пришло - выполняем напоминание
+                    executeReminder(reminder)
+                } catch (e: CancellationException) {
+                    logger.debug("Timer cancelled for reminder ${reminder.id}")
+                } catch (e: Exception) {
+                    logger.error("Error in reminder timer: ${e.message}", e)
+                }
+            }
+
+            reminderTimers[reminder.id] = timerJob
+        }
+    }
+
+    /**
+     * Выполняет напоминание: отправляет уведомление и обрабатывает повторение.
+     */
+    private suspend fun executeReminder(reminder: Reminder) {
+        logger.info("Executing reminder: ${reminder.text} (ID: ${reminder.id})")
+
+        sendNotification(reminder)
+
+        // Handle recurring reminders
+        if (reminder.recurrenceType != "none") {
+            handleRecurringReminder(reminder)
+        } else {
+            // One-time reminder - mark as notified and remove timer
+            markNotified(reminder.id)
+            synchronized(timersLock) {
+                reminderTimers.remove(reminder.id)
             }
         }
     }
 
-    private fun checkDueReminders() {
-        val dueReminders = conversationRepository.checkDueReminders()
-
-        if (dueReminders.isNotEmpty()) {
-            logger.info("Found ${dueReminders.size} due reminders")
-
-            dueReminders.forEach { reminder ->
-                sendNotification(reminder)
-
-                // Handle recurring reminders
-                if (reminder.recurrenceType != "none") {
-                    handleRecurringReminder(reminder)
-                } else {
-                    // One-time reminder - just mark as notified
-                    markNotified(reminder.id)
-                }
-            }
+    /**
+     * Отменяет таймер для конкретного напоминания.
+     */
+    private fun cancelReminderTimer(reminderId: String) {
+        synchronized(timersLock) {
+            reminderTimers[reminderId]?.cancel()
+            reminderTimers.remove(reminderId)
+            logger.debug("Timer cancelled for reminder: $reminderId")
         }
     }
 
@@ -108,7 +163,7 @@ class ReminderService(
             logger.info("Reminder notification sent to session: ${reminder.sessionId}")
 
             // Broadcast via WebSocket for real-time delivery
-            broadcastMessage(reminder.sessionId, message)
+            broadcastMessage(reminder.sessionId, message, reminder.text)
         }
     }
 
@@ -183,7 +238,7 @@ class ReminderService(
                         inputTokens = usage?.input_tokens,
                         outputTokens = usage?.output_tokens
                     )
-                    broadcastMessage(reminder.sessionId, message)
+                    broadcastMessage(reminder.sessionId, message, reminder.text)
                 }
             } catch (e: Exception) {
                 logger.error("Error executing AI response task: ${e.message}", e)
@@ -212,6 +267,8 @@ class ReminderService(
         }
 
         // Parse task context to get tool name, parameters, and original user request
+        logger.info("⚙️ MCP Tool Task - Raw taskContext: ${reminder.taskContext}")
+
         val (toolName, toolArguments, userRequest) = try {
             val context = Json.parseToJsonElement(reminder.taskContext ?: "{}")
             val contextObj = context.jsonObject
@@ -220,18 +277,18 @@ class ReminderService(
             val request = contextObj["user_request"]?.jsonPrimitive?.content ?: ""
             Triple(name, args, request)
         } catch (e: Exception) {
-            logger.error("Error parsing MCP tool context: ${e.message}")
+            logger.error("❌ Error parsing MCP tool context: ${e.message}, taskContext: ${reminder.taskContext}")
             handleSimpleReminder(reminder)
             return
         }
 
         if (toolName.isEmpty()) {
-            logger.error("MCP tool name is empty")
+            logger.error("❌ MCP tool name is empty, taskContext was: ${reminder.taskContext}")
             handleSimpleReminder(reminder)
             return
         }
 
-        logger.info("Executing MCP tool task: $toolName with arguments: $toolArguments")
+        logger.info("⚙️ Executing MCP tool task: toolName='$toolName', arguments=$toolArguments, userRequest='$userRequest'")
 
         // Execute MCP tool asynchronously
         scope.launch {
@@ -245,7 +302,8 @@ class ReminderService(
                     sessionId = reminder.sessionId
                 )
 
-                logger.info("MCP tool executed successfully: $toolName, result: $toolResult")
+                logger.info("✅ MCP tool executed: toolName='$toolName', result length=${toolResult?.length ?: 0}")
+                logger.debug("MCP tool result (first 500 chars): ${toolResult?.take(500)}")
 
                 // Now ask Claude to format the tool result into a human-readable response
                 // Get conversation history
@@ -276,7 +334,7 @@ class ReminderService(
                         role = "assistant",
                         content = resultMessage
                     )
-                    broadcastMessage(reminder.sessionId, message)
+                    broadcastMessage(reminder.sessionId, message, reminder.text)
                 } else if (reply != null) {
                     logger.info("MCP tool result formatted successfully by Claude")
                     // Save the formatted response
@@ -287,7 +345,7 @@ class ReminderService(
                         inputTokens = usage?.input_tokens,
                         outputTokens = usage?.output_tokens
                     )
-                    broadcastMessage(reminder.sessionId, message)
+                    broadcastMessage(reminder.sessionId, message, reminder.text)
                 }
 
             } catch (e: Exception) {
@@ -299,12 +357,12 @@ class ReminderService(
                     role = "assistant",
                     content = errorMessage
                 )
-                broadcastMessage(reminder.sessionId, message)
+                broadcastMessage(reminder.sessionId, message, reminder.text)
             }
         }
     }
 
-    private fun broadcastMessage(sessionId: String, message: com.claude.agent.models.Message?) {
+    private fun broadcastMessage(sessionId: String, message: com.claude.agent.models.Message?, reminderText: String? = null) {
         if (webSocketService != null && message != null) {
             scope.launch {
                 try {
@@ -313,8 +371,35 @@ class ReminderService(
                         sessionId = sessionId,
                         data = Json.encodeToString(message)
                     )
+                    // Отправить подключенным к этой сессии
                     webSocketService.broadcastToSession(sessionId, wsMessage)
-                    logger.info("WebSocket broadcast sent for reminder in session: $sessionId")
+
+                    // ВАЖНО: Также отправить new_message глобально для Compose Web UI
+                    // который не подключается к WebSocket сессии
+                    webSocketService.broadcastGlobal(wsMessage)
+
+                    // ВАЖНО: Отправить глобальное уведомление для обновления списка чатов
+                    val globalMessage = WebSocketMessage(
+                        type = "session_updated",
+                        sessionId = sessionId,
+                        data = """{"unread":true,"hasNewMessage":true}"""
+                    )
+                    webSocketService.broadcastGlobal(globalMessage)
+
+                    // Отправить браузерное уведомление
+                    if (reminderText != null) {
+                        val notificationMessage = WebSocketMessage(
+                            type = "show_notification",
+                            sessionId = sessionId,
+                            data = Json.encodeToString(mapOf(
+                                "title" to "🔔 Напоминание",
+                                "body" to reminderText
+                            ))
+                        )
+                        webSocketService.broadcastGlobal(notificationMessage)
+                    }
+
+                    logger.info("WebSocket broadcast sent for reminder in session: $sessionId (session + global)")
                 } catch (e: Exception) {
                     logger.error("Error broadcasting WebSocket message: ${e.message}", e)
                 }
@@ -362,6 +447,7 @@ class ReminderService(
             if (shouldContinue) {
                 // Delete current reminder and create next occurrence
                 conversationRepository.deleteReminder(reminder.id)
+                cancelReminderTimer(reminder.id)
 
                 val nextReminder = reminder.copy(
                     id = UUID.randomUUID().toString(),
@@ -372,9 +458,13 @@ class ReminderService(
 
                 conversationRepository.createReminder(nextReminder)
                 logger.info("Created next occurrence of recurring reminder: ${reminder.text} at $nextDueAt")
+
+                // Schedule timer for next occurrence
+                scheduleReminder(nextReminder)
             } else {
-                // End of recurrence - mark as notified
+                // End of recurrence - mark as notified and cancel timer
                 markNotified(reminder.id)
+                cancelReminderTimer(reminder.id)
                 logger.info("Recurring reminder ended: ${reminder.text}")
             }
         } catch (e: Exception) {
@@ -412,6 +502,10 @@ class ReminderService(
         conversationRepository.createReminder(reminder)
 
         logger.info("Reminder created: ${reminder.text} for session: $sessionId (type: $taskType, recurrence: $recurrenceType every $recurrenceInterval)")
+
+        // Schedule individual timer for this reminder
+        scheduleReminder(reminder)
+
         return reminder
     }
 
@@ -424,6 +518,7 @@ class ReminderService(
 
     fun deleteReminder(id: String) {
         conversationRepository.deleteReminder(id)
+        cancelReminderTimer(id)
         logger.info("Reminder deleted: $id")
     }
 }

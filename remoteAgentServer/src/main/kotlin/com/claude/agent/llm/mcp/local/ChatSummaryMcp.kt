@@ -16,6 +16,7 @@ class ChatSummaryMcp() : Mcp.Local {
         first = CHAT_SUMMARY,
         second = LocalToolDefinition(
             name = CHAT_SUMMARY,
+            ui_description = "Возвращает краткое summary текущего чата.",
             description = """
                 Возвращает краткое summary текущего чата.
                 Используй этот инструмент, когда нужно:

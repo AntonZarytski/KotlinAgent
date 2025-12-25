@@ -3,7 +3,7 @@
 
 echo "=== Остановка KotlinAgent ==="
 
-PID=$(pgrep -f "java -jar.*app.jar" || true)
+PID=$(pgrep -f "java -jar.*remoteAgentServer.jar" || true)
 
 if [ -z "$PID" ]; then
     echo "KotlinAgent не запущен"

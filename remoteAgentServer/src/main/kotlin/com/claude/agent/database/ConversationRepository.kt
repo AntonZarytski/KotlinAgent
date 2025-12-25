@@ -11,6 +11,7 @@ import com.claude.agent.models.TokenUsage
 import java.time.Instant
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.slf4j.LoggerFactory
 
@@ -202,8 +203,8 @@ class ConversationRepository {
 
     fun getReminders(): List<Reminder> {
         return mainDbTransaction {
-            Reminders.selectAll().map { row ->
-                Reminder(
+            Reminders.selectAll().where { (Reminders.notified eq false) and (Reminders.done eq false) }
+                .map { row ->                Reminder(
                     id = row[Reminders.id],
                     sessionId = row[Reminders.sessionId],
                     text = row[Reminders.text],
@@ -289,7 +290,7 @@ class ConversationRepository {
                     try {
                         val dueAt = Instant.parse(reminder.due_at)
                         if (dueAt.isBefore(now) || dueAt == now) {
-                            logger.info("Напоминание просрочено: ${reminder.text}, due_at: ${reminder.due_at}, now: $now")
+                            logger.info("Напоминание выполнено: ${reminder.text}, due_at: ${reminder.due_at}, now: $now")
                             reminder
                         } else {
                             null

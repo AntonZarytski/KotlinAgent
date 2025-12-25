@@ -128,20 +128,43 @@ class RagService(
         if (results.isEmpty()) {
             return ""
         }
-        
+
+        // Извлекаем уникальные источники для итоговой справки
+        val sources = results.map { result ->
+            // Извлекаем имя файла из пути для более читаемого отображения
+            val fileName = result.docId.substringAfterLast('/')
+            "$fileName (${result.docId})"
+        }.distinct()
+
         val context = buildString {
-            appendLine("# Relevant Documentation Context")
+            appendLine("# 📚 Контекст из документации")
             appendLine()
+            appendLine("Найдено ${results.size} релевантных фрагментов из ${sources.size} документов.")
+            appendLine()
+
             results.forEachIndexed { index, result ->
-                appendLine("## Document ${index + 1}: ${result.docId} (similarity: ${"%.3f".format(result.similarity)})")
+                val fileName = result.docId.substringAfterLast('/')
+                val similarityPercent = (result.similarity * 100).toInt()
+
+                appendLine("## 📄 Фрагмент ${index + 1}: $fileName")
+                appendLine("**Источник:** `${result.docId}`")
+                appendLine("**Релевантность:** $similarityPercent% (${String.format("%.3f", result.similarity)})")
                 appendLine()
                 appendLine(result.text.trim())
                 appendLine()
                 appendLine("---")
                 appendLine()
             }
+
+            // Добавляем итоговый список источников для удобства Claude
+            appendLine("## 📑 Список всех источников:")
+            sources.forEachIndexed { index, source ->
+                appendLine("${index + 1}. $source")
+            }
+            appendLine()
+            appendLine("**ВАЖНО:** Используйте эти источники в своем ответе!")
         }
-        
+
         return context
     }
     

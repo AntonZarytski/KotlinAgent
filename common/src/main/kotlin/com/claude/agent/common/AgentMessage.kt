@@ -43,6 +43,7 @@ sealed class AgentMessage {
 @Serializable
 data class LocalToolDefinition(
     val name: String,
+    val ui_description: String,
     val description: String,
     val input_schema: JsonObject,
     var enabled: Boolean

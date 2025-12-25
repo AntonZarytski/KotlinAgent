@@ -13,7 +13,45 @@ import org.slf4j.LoggerFactory
  */
 fun Route.webSocketRoutes(webSocketService: WebSocketService) {
     val logger = LoggerFactory.getLogger("WebSocketRoutes")
-    
+
+    // Global WebSocket for session list updates, unread counts, etc.
+    webSocket("/ws/global") {
+        logger.info("Global WebSocket connection established")
+
+        try {
+            // Register this global connection
+            webSocketService.registerGlobalConnection(this)
+
+            // Send initial connection confirmation
+            send(Frame.Text("""{"type":"connected","scope":"global"}"""))
+
+            // Keep connection alive and handle incoming messages
+            incoming.consumeEach { frame ->
+                when (frame) {
+                    is Frame.Text -> {
+                        val text = frame.readText()
+                        logger.debug("Received global WebSocket message: $text")
+                        if (text == "ping") {
+                            send(Frame.Text("pong"))
+                        }
+                    }
+                    is Frame.Close -> {
+                        logger.info("Global WebSocket close frame received")
+                    }
+                    else -> {
+                        logger.debug("Received other frame type: ${frame.frameType}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            logger.error("Global WebSocket error: ${e.message}", e)
+        } finally {
+            // Unregister connection when it closes
+            webSocketService.unregisterGlobalConnection(this)
+            logger.info("Global WebSocket connection closed")
+        }
+    }
+
     webSocket("/ws/{sessionId}") {
         val sessionId = call.parameters["sessionId"]
         

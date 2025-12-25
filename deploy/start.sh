@@ -4,7 +4,7 @@
 set -e
 
 APP_DIR="/home/agent/KotlinAgent"
-JAR_FILE="$APP_DIR/app/build/libs/app.jar"
+JAR_FILE="$APP_DIR/remoteAgentServer/build/libs/remoteAgentServer.jar"
 
 echo "=== Запуск KotlinAgent ==="
 
@@ -21,7 +21,7 @@ if [ ! -f ".env" ]; then
 fi
 
 # Проверяем, не запущен ли уже
-if pgrep -f "$JAR_FILE" > /dev/null; then
+if pgrep -f "remoteAgentServer.jar" > /dev/null; then
     echo "⚠️ KotlinAgent уже запущен — пропускаем старт"
     exit 0
 fi

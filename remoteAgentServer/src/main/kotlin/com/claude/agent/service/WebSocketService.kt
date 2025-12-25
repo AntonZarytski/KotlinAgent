@@ -19,6 +19,9 @@ class WebSocketService {
     
     // Map of sessionId -> Set of WebSocket connections
     private val sessionConnections = ConcurrentHashMap<String, MutableSet<WebSocketSession>>()
+
+    // Global connections (for notifications about any session updates)
+    private val globalConnections = mutableSetOf<WebSocketSession>()
     private val mutex = Mutex()
     
     /**
@@ -77,10 +80,67 @@ class WebSocketService {
     }
     
     /**
+     * Register a global WebSocket connection (receives notifications about all sessions).
+     */
+    suspend fun registerGlobalConnection(connection: WebSocketSession) {
+        mutex.withLock {
+            globalConnections.add(connection)
+            logger.info("Global WebSocket connected (total: ${globalConnections.size})")
+        }
+    }
+
+    /**
+     * Unregister a global WebSocket connection.
+     */
+    suspend fun unregisterGlobalConnection(connection: WebSocketSession) {
+        mutex.withLock {
+            globalConnections.remove(connection)
+            logger.info("Global WebSocket disconnected (total: ${globalConnections.size})")
+        }
+    }
+
+    /**
+     * Broadcast a message to ALL global connections (for session list updates, unread counts, etc.)
+     */
+    suspend fun broadcastGlobal(message: WebSocketMessage) {
+        val messageJson = Json.encodeToString(message)
+
+        logger.info("Broadcasting globally: ${message.type} for session ${message.sessionId} (${globalConnections.size} connections)")
+
+        val deadConnections = mutableSetOf<WebSocketSession>()
+
+        for (connection in globalConnections) {
+            try {
+                connection.send(Frame.Text(messageJson))
+            } catch (e: ClosedReceiveChannelException) {
+                logger.warn("Global connection closed")
+                deadConnections.add(connection)
+            } catch (e: Exception) {
+                logger.error("Error sending global message: ${e.message}", e)
+                deadConnections.add(connection)
+            }
+        }
+
+        // Clean up dead connections
+        if (deadConnections.isNotEmpty()) {
+            mutex.withLock {
+                globalConnections.removeAll(deadConnections)
+            }
+        }
+    }
+
+    /**
      * Get the number of active connections for a session.
      */
     fun getConnectionCount(sessionId: String): Int {
         return sessionConnections[sessionId]?.size ?: 0
+    }
+
+    /**
+     * Get the number of global connections.
+     */
+    fun getGlobalConnectionCount(): Int {
+        return globalConnections.size
     }
 }
 

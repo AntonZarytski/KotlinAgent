@@ -44,6 +44,7 @@ data class ChatRequest(
     val conversation_history: List<Message> = emptyList(),
     val enabled_tools: List<String> = emptyList(),
     val user_location: UserLocation? = null,
+    val show_intermediate_messages: Boolean = true,
     val use_rag: Boolean = false,           // Использовать RAG для контекста
     val rag_top_k: Int = 3,                 // Количество релевантных чанков
     val rag_min_similarity: Double = 0.3,   // Минимальный порог схожести (0.0-1.0)
@@ -55,7 +56,8 @@ data class ChatResponse(
     val reply: String,
     val usage: TokenUsage? = null,
     val compressed_history: List<Message>? = null,
-    val compression_applied: Boolean = false
+    val compression_applied: Boolean = false,
+    val intermediate_messages: List<Message> = emptyList()
 )
 
 @Serializable

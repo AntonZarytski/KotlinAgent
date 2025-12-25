@@ -62,7 +62,57 @@ import java.security.KeyStore
  */
 
 /**
- * Разрешает путь к папке статических файлов.
+ * Разрешает путь к Compose Web сборке.
+ * Ищет скомпилированные файлы Compose Web в нескольких возможных местах:
+ *
+ * **Production (после deploy.sh):**
+ * - `/home/agent/KotlinAgent/ui/` - deploy.sh копирует сюда файлы из compose-ui/build/dist/js/productionExecutable/
+ * - Содержит: index.html, compose-web.js, styles.css
+ *
+ * **Development (локальная разработка):**
+ * - `compose-ui/build/dist/js/productionExecutable/` - результат ./gradlew :compose-ui:jsBrowserDistribution
+ * - `compose-ui/build/distributions/` - альтернативная папка сборки
+ *
+ * @param logger Логгер для отладочных сообщений
+ * @return File объект с найденной папкой или null, если не найдена
+ */
+private fun resolveComposeWebPath(logger: org.slf4j.Logger): File? {
+    val possiblePaths = listOf(
+        // Для production деплоя (deploy.sh копирует в ui/)
+        // WorkingDirectory=/home/agent/KotlinAgent, поэтому "ui" будет найден
+        File("ui"),
+        File(System.getProperty("user.dir"), "ui"),
+        // Для запуска из корня проекта (development)
+        File("compose-ui/build/dist/js/productionExecutable"),
+        File("compose-ui/build/distributions"),
+        // Для запуска из app/
+        File("../compose-ui/build/dist/js/productionExecutable"),
+        File("../compose-ui/build/distributions"),
+        // Относительно user.dir
+        File(System.getProperty("user.dir"), "compose-ui/build/dist/js/productionExecutable"),
+        File(System.getProperty("user.dir"), "compose-ui/build/distributions")
+    )
+
+    logger.debug("Поиск Compose Web сборки в следующих местах:")
+    for (path in possiblePaths) {
+        logger.debug("  - ${path.absolutePath} (exists: ${path.exists()}, isDirectory: ${path.isDirectory})")
+        if (path.exists() && path.isDirectory) {
+            val indexFile = File(path, "index.html")
+            if (indexFile.exists()) {
+                logger.info("✅ Найдена Compose Web сборка: ${path.absolutePath}")
+                return path
+            } else {
+                logger.debug("    Папка найдена, но index.html отсутствует")
+            }
+        }
+    }
+
+    logger.warn("❌ Compose Web сборка не найдена")
+    return null
+}
+
+/**
+ * Разрешает путь к папке статических файлов (legacy).
  * Ищет папку в нескольких возможных местах:
  * 1. Относительно текущей рабочей директории
  * 2. Относительно корня проекта (user.dir)
@@ -122,8 +172,57 @@ fun loadKeyStore(filename: String, password: String): KeyStore {
     return keyStore
 }
 
+/**
+ * Запускает Compose UI webpack dev server в отдельном процессе.
+ * Это обеспечивает hot reload при изменении файлов.
+ */
+private fun startComposeUIDevServer(logger: org.slf4j.Logger) {
+    val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+    val gradlewCommand = if (isWindows) "gradlew.bat" else "./gradlew"
+
+    val projectRoot = File(System.getProperty("user.dir"))
+    val gradlewFile = File(projectRoot, gradlewCommand)
+
+    if (!gradlewFile.exists()) {
+        logger.warn("⚠️ Gradle wrapper не найден, пропускаем автозапуск Compose UI")
+        return
+    }
+
+    try {
+        val processBuilder = ProcessBuilder()
+            .command(gradlewFile.absolutePath, ":compose-ui:jsBrowserRun", "--continuous")
+            .directory(projectRoot)
+            .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+            .redirectError(ProcessBuilder.Redirect.INHERIT)
+
+        logger.info("🚀 Запуск Compose UI webpack dev server...")
+        logger.info("   Команда: ${processBuilder.command().joinToString(" ")}")
+
+        val process = processBuilder.start()
+
+        // Убиваем процесс при завершении JVM
+        Runtime.getRuntime().addShutdownHook(Thread {
+            logger.info("Остановка Compose UI webpack dev server...")
+            process.destroy()
+            process.waitFor()
+        })
+
+        logger.info("✅ Compose UI webpack dev server запущен (PID: ${process.pid()})")
+        logger.info("   Webpack будет доступен на http://localhost:8080")
+
+    } catch (e: Exception) {
+        logger.error("❌ Не удалось запустить Compose UI webpack dev server: ${e.message}", e)
+    }
+}
+
 fun main() {
     val logger = LoggerFactory.getLogger("Application")
+
+    // Запускаем Compose UI webpack dev server в фоне (если нужно)
+    val autoStartComposeUI = System.getProperty("autoStartComposeUI", "true").toBoolean()
+    if (autoStartComposeUI) {
+        startComposeUIDevServer(logger)
+    }
 
     logger.info("=== Starting Application ===")
 
@@ -367,56 +466,63 @@ fun Application.module() {
         // WebSocket for real-time updates
         webSocketRoutes(webSocketService)
 
-        // === БЕЗ КОРНЕВОГО РОУТА - ОН ПЕРЕХВАТЫВАЕТ WEBSOCKET ===
+        // Статические файлы (UI) - ДОЛЖНЫ БЫТЬ В КОНЦЕ!
 
-        // Подготавливаем путь к UI для статических файлов
-        val staticFolder = AppConfig.staticFolder
-        val staticPath = resolveStaticPath(staticFolder, logger)
+        // Попробуем найти Compose Web сборку
+        val composeWebPath = resolveComposeWebPath(logger)
 
-        // Главная страница (ПОСЛЕ WebSocket роутов, но ПЕРЕД catch-all)
-        get("/") {
-            if (staticPath != null && staticPath.exists() && staticPath.isDirectory) {
-                val indexFile = File(staticPath, "index.html")
-                if (indexFile.exists()) {
-                    call.respondFile(indexFile)
-                } else {
-                    call.respondText("UI index.html не найден", ContentType.Text.Plain, HttpStatusCode.NotFound)
-                }
-            } else {
-                call.respondText(
-                    """
-                    <!DOCTYPE html>
-                    <html>
-                    <head><title>KotlinAgent API</title></head>
-                    <body>
-                        <h1>KotlinAgent API</h1>
-                        <p>Сервер работает!</p>
-                        <ul>
-                            <li><a href="/health">GET /health</a> - Health check</li>
-                            <li><a href="/api/tools">GET /api/tools</a> - MCP инструменты</li>
-                            <li>POST /api/chat - Отправить сообщение Claude</li>
-                            <li>GET /api/sessions - Список сессий</li>
-                            <li><a href="/mcp/agents/status">GET /mcp/agents/status</a> - Статус локальных агентов</li>
-                            <li><a href="/ui">Web UI</a> - Веб интерфейс</li>
-                            <li>WebSocket: /mcp/local-agent</li>
-                        </ul>
-                        <p><strong>⚠️ UI не найден:</strong> Папка '$staticFolder' не найдена</p>
-                    </body>
-                    </html>
-                    """.trimIndent(),
-                    ContentType.Text.Html
-                )
-            }
-        }
-        // Статические файлы для UI (ПОСЛЕ всех API роутов и конкретных путей!)
-        if (staticPath != null && staticPath.exists() && staticPath.isDirectory) {
-            // Обслуживаем статические файлы по /ui пути - БЕЗ КОРНЕВОГО ПУТИ!
-            staticFiles("/ui", staticPath)
+        if (composeWebPath != null && composeWebPath.exists() && composeWebPath.isDirectory) {
+            // Обслуживаем Compose Web приложение
+            staticFiles("/", composeWebPath)
 
-            logger.info("✅ Статические файлы доступны из: ${staticPath.absolutePath}")
-            logger.info("✅ UI доступно по адресу: /ui (НЕ на корневом пути)")
+            logger.info("✅ Compose Web приложение доступно из: ${composeWebPath.absolutePath}")
         } else {
-            logger.warn("❌ Папка статических файлов не найдена: $staticFolder")
+            // Fallback к старым статическим файлам
+            val staticFolder = AppConfig.staticFolder
+            val staticPath = resolveStaticPath(staticFolder, logger)
+
+            if (staticPath != null && staticPath.exists() && staticPath.isDirectory) {
+                staticFiles("/static", staticPath)
+
+                get("/") {
+                    val indexFile = File(staticPath, "index.html")
+                    if (indexFile.exists()) {
+                        call.respondFile(indexFile)
+                    } else {
+                        call.respondText("UI not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                    }
+                }
+
+                logger.info("Статические файлы (legacy) доступны из: ${staticPath.absolutePath}")
+            } else {
+                logger.warn("⚠️ Ни Compose Web, ни legacy UI не найдены")
+
+                // Fallback для корневого URL
+                get("/") {
+                    call.respondText(
+                        """
+                        <!DOCTYPE html>
+                        <html>
+                        <head><title>KotlinAgent</title></head>
+                        <body>
+                            <h1>KotlinAgent API</h1>
+                            <p>Сервер работает!</p>
+                            <p><strong>⚠️ UI не найден. Соберите Compose Web:</strong></p>
+                            <pre>./gradlew :compose-ui:jsBrowserDistribution</pre>
+                            <ul>
+                                <li><a href="/health">GET /health</a> - Health check</li>
+                                <li><a href="/api/tools">GET /api/tools</a> - MCP инструменты</li>
+                                <li>POST /api/chat - Отправить сообщение Claude</li>
+                                <li>GET /api/sessions - Список сессий</li>
+                                <li><a href="/mcp/agents/status">GET /mcp/agents/status</a> - Статус локальных агентов</li>
+                            </ul>
+                        </body>
+                        </html>
+                        """.trimIndent(),
+                        ContentType.Text.Html
+                    )
+                }
+            }
         }
     }
 

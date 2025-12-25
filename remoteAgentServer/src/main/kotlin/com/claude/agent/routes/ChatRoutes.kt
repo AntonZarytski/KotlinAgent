@@ -46,7 +46,7 @@ fun Route.chatRoutes(
             logger.info("Параметры: format=${request.output_format}, max_tokens=$maxTokens, " +
                     "spec_mode=${request.spec_mode}, history_len=${request.conversation_history.size}, " +
                     "temperature=$temperature, session_id=${request.session_id}, " +
-                    "enabled_tools=${request.enabled_tools}")
+                    "enabled_tools=${request.enabled_tools}, show_intermediate=${request.show_intermediate_messages}")
 
             // Сохраняем сообщение пользователя в БД
             if (request.session_id != null) {
@@ -75,7 +75,7 @@ fun Route.chatRoutes(
             }
 
             // Отправляем запрос к Claude API
-            val (reply, usage, error) = claudeClient.sendMessage(
+            val claudeResponse = claudeClient.sendMessage(
                 userMessage = request.message,
                 outputFormat = request.output_format,
                 maxTokens = maxTokens,
@@ -86,6 +86,7 @@ fun Route.chatRoutes(
                 clientIp = clientIp,
                 userLocation = request.user_location,
                 sessionId = request.session_id,
+                showIntermediateMessages = request.show_intermediate_messages,
                 useRag = request.use_rag,
                 ragTopK = request.rag_top_k,
                 ragMinSimilarity = request.rag_min_similarity,
@@ -93,29 +94,30 @@ fun Route.chatRoutes(
             )
 
             // Обработка ошибок
-            if (error != null) {
-                logger.error("Ошибка от Claude API: $error")
-                call.respond(HttpStatusCode.InternalServerError, ErrorResponse(error))
+            if (claudeResponse.error != null) {
+                logger.error("Ошибка от Claude API: ${claudeResponse.error}")
+                call.respond(HttpStatusCode.InternalServerError, ErrorResponse(claudeResponse.error))
                 return@post
             }
 
             // Сохраняем ответ ассистента в БД
-            if (request.session_id != null && reply != null) {
+            if (request.session_id != null && claudeResponse.reply != null) {
                 repository.saveMessage(
                     sessionId = request.session_id,
                     role = "assistant",
-                    content = reply,
-                    inputTokens = usage?.input_tokens,
-                    outputTokens = usage?.output_tokens
+                    content = claudeResponse.reply,
+                    inputTokens = claudeResponse.usage?.input_tokens,
+                    outputTokens = claudeResponse.usage?.output_tokens
                 )
             }
 
             // Формируем ответ
             val response = ChatResponse(
-                reply = reply ?: "",
-                usage = usage,
+                reply = claudeResponse.reply ?: "",
+                usage = claudeResponse.usage,
                 compressed_history = if (compressionApplied) conversationHistory else null,
-                compression_applied = compressionApplied
+                compression_applied = compressionApplied,
+                intermediate_messages = claudeResponse.intermediateMessages
             )
 
             call.respond(HttpStatusCode.OK, response)

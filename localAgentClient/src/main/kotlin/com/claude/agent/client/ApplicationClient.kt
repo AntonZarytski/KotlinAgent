@@ -14,9 +14,10 @@ import kotlinx.coroutines.runBlocking
  */
 fun main() = runBlocking {
     // TODO: Replace with your actual VPS URL
-    // Use wss://95.217.187.167:8443 for secure WebSocket connection (requires valid SSL cert)
-    // Or ws://95.217.187.167:8001 for non-secure WebSocket connection
-    // Or ws://127.0.0.1:8001 for debug
+    // Use wss://95.217.187.167:8443 for secure WebSocket connection(when server deployed on VPS)
+    // Or ws://95.217.187.167:8001 for non-secure WebSocket connection(when server deployed on VPS)
+    // Or ws://127.0.0.1:8001 for debug(when server run locally)
+    // Or wss://127.0.0.1:8001 for debug with https(when server run locally)
     val vpsUrl = "ws://127.0.0.1:8001"
 
     val agent = LocalAndroidStudioAgent(

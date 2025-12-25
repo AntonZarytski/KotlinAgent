@@ -10,6 +10,7 @@ REMOTE_DIR="/home/agent/KotlinAgent"
 LOCAL_DIR="/Users/anton/IdeaProjects/KotlinAgent"
 
 APP_JAR="remoteAgentServer/build/libs/remoteAgentServer.jar"
+COMPOSE_UI_DIR="compose-ui/build/dist/js/productionExecutable"
 APP_PORT="8001"
 
 # SSH ControlMaster для переиспользования соединения
@@ -29,7 +30,22 @@ trap cleanup_ssh EXIT
 echo "Шаг 1: Сборка проекта..."
 cd "$LOCAL_DIR"
 
+# Очистка
 ./gradlew clean
+
+# Сборка Compose UI
+echo "Сборка Compose UI..."
+./gradlew :compose-ui:jsBrowserDistribution
+
+if [ ! -d "$COMPOSE_UI_DIR" ]; then
+    echo "❌ Compose UI не собран: $COMPOSE_UI_DIR"
+    exit 1
+fi
+
+echo "✅ Compose UI собран: $COMPOSE_UI_DIR"
+
+# Сборка сервера
+echo "Сборка сервера..."
 ./gradlew :remoteAgentServer:build -x test
 
 if [ ! -f "$APP_JAR" ]; then
@@ -59,14 +75,47 @@ echo ""
 ### === 3. КОПИРОВАНИЕ ФАЙЛОВ ===
 
 echo "Шаг 3: Копирование файлов..."
-scp $SSH_OPTS "$APP_JAR" "$SERVER:$REMOTE_DIR/remoteAgentServer/build/libs/"
-scp $SSH_OPTS -r ui/ "$SERVER:$REMOTE_DIR/"
-scp $SSH_OPTS -r deploy/ "$SERVER:$REMOTE_DIR/"
-scp $SSH_OPTS -r scripts/ "$SERVER:$REMOTE_DIR/"
-scp $SSH_OPTS .env "$SERVER:$REMOTE_DIR/"
+
+# Копируем JAR файл
+scp "$APP_JAR" "$SERVER:$REMOTE_DIR/remoteAgentServer/build/libs/"
+
+# Копируем собранный Compose UI в ui/
+echo "Копирование Compose UI..."
+scp -r "$COMPOSE_UI_DIR"/* "$SERVER:$REMOTE_DIR/ui/"
+
+# Копируем deploy и scripts
+scp -r deploy/ "$SERVER:$REMOTE_DIR/"
+if [ -d "scripts" ]; then
+    scp -r scripts/ "$SERVER:$REMOTE_DIR/"
+fi
+
+# Копируем .env если существует
+if [ -f ".env" ]; then
+    scp .env "$SERVER:$REMOTE_DIR/"
+fi
+
+# Копируем RAG базу данных если существует
+if [ -f "rag_index.db" ]; then
+    echo "Копирование RAG базы данных..."
+    scp rag_index.db "$SERVER:$REMOTE_DIR/"
+    echo "✅ RAG база данных скопирована"
+else
+    echo "⚠️  rag_index.db не найден - RAG функционал будет недоступен"
+fi
+
+# Копируем RAG данные если существуют
+if [ -d "rag/rag_data" ]; then
+    echo "Копирование RAG данных..."
+    ssh "$SERVER" "mkdir -p $REMOTE_DIR/rag"
+    scp -r rag/rag_data "$SERVER:$REMOTE_DIR/rag/"
+    echo "✅ RAG данные скопированы"
+fi
 
 # Делаем скрипты исполняемыми на сервере
-ssh $SSH_OPTS "$SERVER" "chmod +x $REMOTE_DIR/scripts/*.sh $REMOTE_DIR/deploy/*.sh"
+ssh "$SERVER" "chmod +x $REMOTE_DIR/deploy/*.sh"
+if ssh "$SERVER" "[ -d $REMOTE_DIR/scripts ]"; then
+    ssh "$SERVER" "chmod +x $REMOTE_DIR/scripts/*.sh"
+fi
 
 echo "✅ Файлы скопированы"
 echo ""
@@ -74,7 +123,7 @@ echo ""
 ### === 4. ПРОВЕРКА .env ===
 
 echo "Шаг 4: Проверка .env..."
-ssh $SSH_OPTS "$SERVER" << 'ENDSSH'
+ssh "$SERVER" << 'ENDSSH'
 cd /home/agent/KotlinAgent
 if [ ! -f ".env" ]; then
     echo "❌ .env не найден"
@@ -89,12 +138,11 @@ echo ""
 
 echo "Шаг 5: Перезапуск приложения..."
 
-ssh $SSH_OPTS "$SERVER" << 'ENDSSH'
+ssh "$SERVER" << 'ENDSSH'
 set -e
 
 if systemctl list-unit-files | grep -q kotlinagent.service; then
     echo "Используем systemd"
-    # Используем sudo без пароля (требуется настройка sudoers)
     sudo systemctl restart kotlinagent
     sudo systemctl status kotlinagent --no-pager
 else
@@ -134,6 +182,39 @@ else
 fi
 
 echo ""
+
+### === 7. ПРОВЕРКА OLLAMA ===
+
+echo "Шаг 7: Проверка Ollama для RAG..."
+
+# Проверяем Ollama на сервере
+ssh "$SERVER" << 'ENDSSH'
+if command -v ollama &> /dev/null; then
+    echo "✅ Ollama установлена"
+
+    # Проверяем, что Ollama запущена
+    if curl -s http://localhost:11434/api/tags &> /dev/null; then
+        echo "✅ Ollama сервис работает"
+
+        # Проверяем наличие модели nomic-embed-text
+        if ollama list | grep -q "nomic-embed-text"; then
+            echo "✅ Модель nomic-embed-text установлена"
+        else
+            echo "⚠️  Модель nomic-embed-text не найдена"
+            echo "   Установите модель: ollama pull nomic-embed-text"
+        fi
+    else
+        echo "⚠️  Ollama не запущена"
+        echo "   Запустите: sudo systemctl start ollama"
+    fi
+else
+    echo "⚠️  Ollama не установлена - RAG функционал будет недоступен"
+    echo "   Установите Ollama: curl -fsSL https://ollama.com/install.sh | sh"
+    echo "   Затем установите модель: ollama pull nomic-embed-text"
+fi
+ENDSSH
+
+echo ""
 echo "=== ✅ Деплой завершён ==="
 echo ""
 echo "Доступные URL:"
@@ -144,3 +225,8 @@ echo "Для настройки настоящего SSL сертификата:
 echo "  ./scripts/setup-duckdns-ssl.sh myapp TOKEN email@example.com"
 echo "  или"
 echo "  sudo ./scripts/setup-ssl-nginx.sh yourdomain.com email@example.com"
+echo ""
+echo "Для настройки RAG (если не установлено):"
+echo "  ssh $SERVER"
+echo "  curl -fsSL https://ollama.com/install.sh | sh"
+echo "  ollama pull nomic-embed-text"

@@ -13,7 +13,7 @@ plugins {
 dependencies {
     // Project "app" depends on project "utils". (Project paths are separated with ":", so ":utils" refers to the top-level "utils" project.)
     implementation(project(":common"))
-//    implementation(project(":compose-ui"))
+    // Note: compose-ui собирается отдельно как JS приложение (см. tasks.named("run"))
 
     // Ktor Server
     implementation(libs.bundles.ktorServer)
@@ -45,4 +45,23 @@ tasks.jar {
     // Включаем все зависимости в JAR (fat JAR)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
+}
+
+// Собирать Compose UI перед запуском сервера (без кеша для dev)
+tasks.named("run") {
+    dependsOn(":compose-ui:jsBrowserDistribution")
+}
+
+// ВАЖНО: Собирать UI даже при запуске из IntelliJ IDEA
+tasks.named("classes") {
+    dependsOn(":compose-ui:jsBrowserDistribution")
+}
+
+// Отключить кеширование для compose-ui задач при разработке
+gradle.taskGraph.whenReady {
+    allTasks
+        .filter { it.project.name == "compose-ui" }
+        .forEach {
+            it.outputs.upToDateWhen { false }
+        }
 }
