@@ -1,0 +1,1915 @@
+================================================================================
+                    KOTLINAGENT - ПОЛНАЯ ДОКУМЕНТАЦИЯ ПРОЕКТА
+                     Для использования в RAG системе
+================================================================================
+
+СОДЕРЖАНИЕ:
+1. Обзор проекта
+2. Архитектура модулей
+3. Ключевые компоненты
+4. База данных
+5. API эндпоинты
+6. Конфигурация
+7. Примеры использования
+
+================================================================================
+1. ОБЗОР ПРОЕКТА
+================================================================================
+
+НАЗНАЧЕНИЕ:
+KotlinAgent - это Kotlin-based AI chatbot платформа для взаимодействия с
+Anthropic Claude API. Изначально написанная на Python Flask, полностью
+переписана на Kotlin с использованием Ktor framework для повышения
+производительности, типобезопасности и современных архитектурных паттернов.
+
+КЛЮЧЕВЫЕ ВОЗМОЖНОСТИ:
+- Интеграция с Claude API (Claude 3.5 Sonnet) с поддержкой streaming
+- RAG (Retrieval-Augmented Generation) - семантический поиск по документации
+- MCP (Model Context Protocol) - расширяемая система инструментов
+- Prompt Caching - экономия токенов до 90%
+- Token Optimization - автоматическое сжатие истории, фильтрация tools
+- Reminder System - планировщик задач с AI ответами и повторяющимися напоминаниями
+- WebSocket Support - real-time обновления и streaming
+- Multi-platform UI - Desktop (Compose), Web (HTML/JS), HTTP API
+
+ТЕХНОЛОГИЧЕСКИЙ СТЕК:
+
+Backend:
+- Язык: Kotlin 2.2.20
+- Framework: Ktor 3.x (async HTTP server)
+- Database: SQLite с Exposed ORM 0.57.0
+- HTTP Client: Ktor Client (OkHttp)
+- Serialization: kotlinx.serialization
+- Logging: Logback 1.5.12
+- Build: Gradle 8.14
+
+AI/ML:
+- LLM: Claude 3.5 Sonnet (Anthropic API)
+- Embeddings: Ollama (mxbai-embed-large, 768-dim vectors)
+- Vector Search: Custom cosine similarity
+
+External APIs:
+- Anthropic Claude API - основной AI сервис
+- Ollama - локальная генерация embeddings
+- Open-Meteo - данные о погоде
+- NOAA - солнечная активность
+
+ТРЕБОВАНИЯ:
+- Java 24 (Kotlin 2.2.20 не поддерживает Java 25)
+- Gradle 8.14 (через wrapper)
+- Ollama (для RAG embeddings)
+
+================================================================================
+2. АРХИТЕКТУРА МОДУЛЕЙ
+================================================================================
+
+СТРУКТУРА ПРОЕКТА:
+
+KotlinAgent/
+├── remoteAgentServer/          # Основной Ktor сервер
+├── rag/                         # RAG индексация документов
+├── common/                      # Общие модели и таблицы БД
+├── localAgentClient/            # WebSocket клиент для remote tools
+├── compose-ui/                  # Desktop UI (Compose)
+├── ui/                          # Web frontend (HTML/JS/CSS)
+├── utils/                       # Утилиты
+├── deploy/                      # Скрипты развертывания
+├── docs/                        # Документация
+├── test_docs/                   # Тестовая документация
+├── .env                         # Переменные окружения
+├── settings.gradle.kts          # Конфигурация модулей
+└── build.gradle.kts             # Root build конфигурация
+
+МОДУЛЬ: remoteAgentServer
+Путь: /remoteAgentServer
+Назначение: Основной HTTP/HTTPS сервер приложения
+Ключевые компоненты:
+- ApplicationServer.kt - точка входа, настройка Ktor
+- ClaudeClient.kt - интеграция с Claude API
+- ConversationRepository.kt - работа с БД
+- RagService.kt - семантический поиск
+- MCPTools.kt - система инструментов
+- Routes (ChatRoutes, SessionRoutes, ReminderRoutes, RagRoutes, etc.)
+- Services (WebSocketService, TokenMetricsService, HistoryCompressor, etc.)
+
+Структура:
+remoteAgentServer/
+├── src/main/kotlin/com/claude/agent/
+│   ├── ApplicationServer.kt       # Main entry point (427 строк)
+│   ├── config/                    # Конфигурация
+│   │   ├── AppConfig.kt           # Загрузка .env, API ключи
+│   │   ├── Constants.kt           # Константы приложения
+│   │   └── PromptCachingConfig.kt # Настройки кэширования
+│   ├── database/                  # Data access layer
+│   │   ├── DatabaseFactory.kt     # Фабрика подключений
+│   │   ├── ConversationRepository.kt  # CRUD операции (415 строк)
+│   │   └── models/
+│   │       └── Tables.kt          # Exposed таблицы
+│   ├── llm/                       # LLM интеграция
+│   │   ├── ClaudeClient.kt        # Claude API client (707 строк)
+│   │   └── mcp/                   # Model Context Protocol
+│   │       ├── MCPTools.kt        # Оркестратор tools (96 строк)
+│   │       ├── providers/
+│   │       │   ├── LocalMcpProvider.kt
+│   │       │   └── RemoteMcpProvider.kt
+│   │       ├── local/             # Локальные MCP tools
+│   │       │   ├── WeatherMcp.kt
+│   │       │   ├── SolarActivityMcp.kt
+│   │       │   ├── ActionPlannerMcp.kt
+│   │       │   ├── ChatSummaryMcp.kt
+│   │       │   ├── ReminderMcp.kt
+│   │       │   ├── AndroidStudioLocalMcp.kt
+│   │       │   ├── GitRepositoryMcp.kt
+│   │       │   └── HelpMcp.kt
+│   │       └── remote/
+│   │           └── AirTicketsMcp.kt
+│   ├── models/                    # Data models
+│   │   └── ApiModels.kt           # Request/Response модели
+│   ├── routes/                    # HTTP routes
+│   │   ├── ChatRoutes.kt          # POST /api/chat (155 строк)
+│   │   ├── SessionRoutes.kt       # CRUD сессий
+│   │   ├── ReminderRoutes.kt      # Управление напоминаниями
+│   │   ├── RagRoutes.kt           # RAG поиск
+│   │   ├── MetricsRoutes.kt       # Token метрики
+│   │   ├── HealthRoutes.kt        # Health check
+│   │   └── WebSocketRoutes.kt     # WebSocket endpoints
+│   └── service/                   # Business logic
+│       ├── RagService.kt          # Семантический поиск (167 строк)
+│       ├── OllamaEmbeddingClient.kt  # Генерация embeddings
+│       ├── ReminderService.kt     # Планировщик задач
+│       ├── WebSocketService.kt    # Broadcasting
+│       ├── GeolocationService.kt  # IP → Location
+│       ├── HistoryCompressor.kt   # Сжатие истории
+│       ├── TokenMetricsService.kt # Отслеживание метрик
+│       ├── ToolsFilterService.kt  # Фильтрация tools
+│       └── LocalAgentManager.kt   # Управление local agents
+└── build.gradle.kts
+
+МОДУЛЬ: rag
+Путь: /rag
+Назначение: Индексация документов и генерация vector embeddings
+Ключевые компоненты:
+- Main.kt - точка входа для индексации
+- DataBase.kt - операции с RAG базой данных
+- DocumentReader.kt - загрузка документов
+- TextChunk.kt - разбиение текста на чанки
+- OllamaClient.kt - генерация embeddings через Ollama
+
+Структура:
+rag/
+├── src/main/kotlin/com/clauder/agent/
+│   ├── Main.kt                    # Entry point для индексации
+│   ├── DataBase.kt                # RAG database operations
+│   ├── DocumentReader.kt          # Загрузка документов
+│   ├── TextChunk.kt               # Chunking логика
+│   ├── OllamaClient.kt            # Embedding generation
+│   └── models/
+│       └── TextChunk.kt           # Data class
+└── build.gradle.kts
+
+Команда запуска:
+./gradlew :rag:run --args="./docs rag_index.db http://localhost:11434"
+
+МОДУЛЬ: common
+Путь: /common
+Назначение: Общие модели данных и таблицы БД, используемые несколькими модулями
+Ключевые компоненты:
+- RagTables.kt - таблица DocumentChunks для RAG
+- Утилиты конвертации FloatArray ↔ ByteArray
+
+Структура:
+common/
+└── src/main/kotlin/com/claude/agent/common/
+    └── database/
+        └── RagTables.kt           # DocumentChunks table
+
+МОДУЛЬ: localAgentClient
+Путь: /localAgentClient
+Назначение: WebSocket клиент для выполнения remote MCP tools на локальной машине
+Ключевые компоненты:
+- LocalAgent.kt - WebSocket клиент
+
+Структура:
+localAgentClient/
+├── src/main/kotlin/com/claude/agent/client/
+│   └── LocalAgent.kt              # WebSocket client
+├── run-local-agent.sh             # Скрипт запуска (Unix)
+├── run-local-agent.bat            # Скрипт запуска (Windows)
+└── build.gradle.kts
+
+Назначение: Позволяет выполнять команды на локальной машине разработчика
+(например, управление Android эмулятором, ADB команды, просмотр файлов)
+
+МОДУЛЬ: compose-ui
+Путь: /compose-ui
+Назначение: Desktop UI на Compose for Web (Kotlin/JS)
+Статус: Используется для Web UI
+Ключевые компоненты:
+- App.kt - главный компонент UI
+- ApiClient.kt - HTTP клиент для API
+- Models.kt - модели данных
+
+МОДУЛЬ: ui
+Путь: /ui
+Назначение: Статические файлы Web UI
+Содержимое:
+- index.html - Single Page Application
+- styles.css - стили
+- compose-web.js - скомпилированный Kotlin/JS код
+
+ВЗАИМОСВЯЗИ МОДУЛЕЙ:
+
+1. remoteAgentServer ← common (использует RagTables)
+2. rag ← common (использует RagTables)
+3. remoteAgentServer ← localAgentClient (WebSocket соединение)
+4. compose-ui → remoteAgentServer (HTTP API calls)
+5. ui → remoteAgentServer (HTTP API calls, WebSocket)
+
+================================================================================
+3. КЛЮЧЕВЫЕ КОМПОНЕНТЫ
+================================================================================
+
+КОМПОНЕНТ: ApplicationServer.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/ApplicationServer.kt
+Строк: 427
+Назначение: Точка входа приложения, настройка Ktor сервера
+
+Основной поток выполнения:
+
+```kotlin
+fun main() {
+    // 1. Инициализация базы данных
+    DatabaseFactory.init()
+
+    // 2. Генерация SSL сертификата (если нужно)
+    generateCertificateIfNeeded()
+
+    // 3. Запуск Ktor сервера
+    embeddedServer(Netty, ...) {
+        module()
+    }.start(wait = true)
+}
+```
+
+Конфигурация middleware:
+
+```kotlin
+install(ContentNegotiation) {
+    json(Json {
+        prettyPrint = true
+        isLenient = true
+        ignoreUnknownKeys = true
+    })
+}
+
+install(CORS) {
+    allowMethod(HttpMethod.Options)
+    allowMethod(HttpMethod.Get)
+    allowMethod(HttpMethod.Post)
+    allowMethod(HttpMethod.Delete)
+    allowHeader(HttpHeaders.ContentType)
+    allowCredentials = true
+    anyHost()
+}
+
+install(CallLogging) {
+    level = Level.INFO
+    format { call ->
+        "${call.response.status()}: ${call.request.httpMethod.value} - ${call.request.uri}"
+    }
+}
+
+install(WebSockets) {
+    pingPeriod = Duration.ofSeconds(15)
+    timeout = Duration.ofSeconds(15)
+    maxFrameSize = Long.MAX_VALUE
+    masking = false
+}
+```
+
+Инициализация сервисов:
+
+```kotlin
+// Database
+val repository = ConversationRepository()
+
+// WebSocket
+val webSocketService = WebSocketService()
+
+// Geolocation
+val geolocationService = GeolocationService(httpClient)
+
+// RAG
+val ragService = RagService("rag_index.db")
+val ollamaEmbeddingClient = OllamaEmbeddingClient(httpClient)
+
+// MCP Tools
+val localMcpProvider = LocalMcpProvider(listOf(
+    ActionPlannerMcp(),
+    WeatherMcp(httpClient, geolocationService),
+    SolarActivityMcp(httpClient, geolocationService),
+    ChatSummaryMcp(),
+    ReminderMcp(reminderService),
+    AndroidStudioLocalMcp(),
+    GitRepositoryMcp(),
+    HelpMcp(ragService, ollamaEmbeddingClient)
+))
+
+val remoteMcpProvider = RemoteMcpProvider(listOf(AirTicketsMcp()))
+val mcpTools = MCPTools(localMcpProvider, remoteMcpProvider)
+
+// Token Optimization
+val tokenMetricsService = TokenMetricsService()
+val toolsFilterService = ToolsFilterService()
+
+// Claude Client
+val claudeClient = ClaudeClient(
+    httpClient, mcpTools, webSocketService,
+    tokenMetricsService, toolsFilterService,
+    ragService, ollamaEmbeddingClient
+)
+
+// History Compression
+val historyCompressor = HistoryCompressor(claudeClient, tokenMetricsService)
+
+// Reminders
+val reminderService = ReminderService(repository, webSocketService)
+reminderService.startScheduler()
+```
+
+Routing:
+
+```kotlin
+routing {
+    // WebSocket для local agents
+    webSocket("/mcp/local-agent") {
+        localAgentManager.handleConnection(this)
+    }
+
+    // API routes
+    healthRoutes(claudeClient, mcpTools)
+    chatRoutes(claudeClient, mcpTools, historyCompressor, repository)
+    sessionRoutes(repository)
+    reminderRoutes(reminderService)
+    ragRoutes(ragService, ollamaEmbeddingClient)
+    metricsRoutes(tokenMetricsService)
+    webSocketRoutes(webSocketService)
+
+    // Static files
+    staticFiles("/ui", staticPath)
+    staticFiles("/", staticPath) {
+        default("index.html")
+    }
+}
+```
+
+SSL/TLS конфигурация:
+
+```kotlin
+// HTTP коннектор
+connector {
+    port = AppConfig.port  // 8000
+    host = AppConfig.host  // 0.0.0.0
+}
+
+// HTTPS коннектор
+sslConnector(
+    keyStore = loadKeyStore("ktor.p12", "changeit"),
+    keyAlias = "ktor",
+    keyStorePassword = { "changeit".toCharArray() },
+    privateKeyPassword = { "changeit".toCharArray() }
+) {
+    port = 8443
+    host = AppConfig.host
+}
+```
+
+КОМПОНЕНТ: ClaudeClient.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/llm/ClaudeClient.kt
+Строк: 707
+Назначение: Полная интеграция с Claude API с поддержкой tool calling, streaming,
+RAG и prompt caching
+
+Ключевые методы:
+
+1. sendMessage() - основной метод отправки сообщений
+
+Сигнатура:
+```kotlin
+suspend fun sendMessage(
+    userMessage: String,
+    outputFormat: String = "default",
+    model: String = ClaudeConfig.MODEL,
+    maxTokens: Int = ClaudeConfig.MAX_TOKENS,
+    specMode: Boolean = false,
+    conversationHistory: List<Message> = emptyList(),
+    temperature: Double = 1.0,
+    enabledTools: List<String> = emptyList(),
+    clientIp: String? = null,
+    userLocation: UserLocation? = null,
+    sessionId: String? = null,
+    useRag: Boolean = false,
+    ragTopK: Int = 3,
+    ragMinSimilarity: Double = 0.3,
+    ragFilterEnabled: Boolean = true
+): Triple<String?, TokenUsage?, String?>
+```
+
+Поток выполнения:
+- RAG Context Retrieval (если включен)
+- System Prompt Building
+- Messages Construction
+- Tool Filtering (динамическая фильтрация)
+- API Request с prompt caching headers
+- Response Handling with Tool Calls
+
+2. handleResponse() - обработка ответа с multi-turn tool calling
+
+Алгоритм:
+- Максимум 20 итераций tool calling
+- Loop detection для предотвращения бесконечных циклов
+- Параллельное выполнение всех tools в одной итерации
+- Real-time updates через WebSocket
+- Автоматическая отправка tool results обратно в Claude
+
+3. buildMessages() - конструирование массива сообщений с RAG и caching
+
+С RAG (два content блока):
+- Block 1: RAG context с cache_control (ephemeral)
+- Block 2: User question
+
+Без RAG:
+- Простое текстовое сообщение
+
+4. retrieveRagContext() - семантический поиск
+
+Шаги:
+- Генерация query embedding через Ollama
+- Нормализация вектора к диапазону [0, 1]
+- Поиск по cosine similarity
+- Фильтрация по порогу (если включена)
+- Форматирование контекста в Markdown
+
+Особенности:
+- Поддержка prompt caching (экономия до 90% токенов)
+- Динамическая фильтрация tools по контексту
+- Loop detection для предотвращения бесконечных циклов
+- Real-time updates через WebSocket
+- Детальное логирование и метрики
+
+КОМПОНЕНТ: ConversationRepository.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/database/ConversationRepository.kt
+Строк: 415
+Назначение: Data access layer для работы с БД (Repository pattern)
+
+Ключевые методы:
+
+Sessions:
+```kotlin
+fun createSession(sessionId: String, title: String): Boolean
+fun getAllSessions(): List<SessionInfo>
+fun deleteSession(sessionId: String): Boolean
+```
+
+Messages:
+```kotlin
+fun saveMessage(
+    sessionId: String,
+    role: String,
+    content: String,
+    inputTokens: Int? = null,
+    outputTokens: Int? = null,
+    read: Boolean = false
+): Message?
+
+fun getSessionHistory(sessionId: String, limit: Int? = null): List<Message>
+fun getSessionHistoryWithStats(sessionId: String): SessionHistoryResponse
+fun markMessagesAsRead(sessionId: String): Int
+```
+
+Reminders:
+```kotlin
+fun createReminder(reminder: Reminder): Boolean
+fun getAllReminders(): List<Reminder>
+fun checkDueReminders(): List<Reminder>
+fun markNotified(reminderId: String): Boolean
+fun markDone(reminderId: String): Boolean
+fun deleteReminder(reminderId: String): Boolean
+```
+
+Transaction Management:
+```kotlin
+private fun <T> mainDbTransaction(
+    statement: org.jetbrains.exposed.sql.Transaction.() -> T
+): T {
+    return transaction(DatabaseFactory.getMainDatabase(), statement)
+}
+```
+
+Особенности:
+- Использует Exposed ORM для type-safe SQL
+- Автоматическое обновление last_updated при сохранении сообщений
+- Поддержка CASCADE DELETE для сессий
+- Подсчет статистики (total tokens, message count)
+
+КОМПОНЕНТ: RagService.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/service/RagService.kt
+Строк: 167
+Назначение: Семантический поиск по индексированным документам
+
+Ключевые методы:
+
+1. search() - поиск релевантных чанков
+
+```kotlin
+fun search(
+    queryEmbedding: FloatArray,
+    topK: Int = 5,
+    minSimilarity: Double = 0.9
+): List<SearchResult> {
+    return transaction(ragDatabase) {
+        val results = mutableListOf<SearchResult>()
+
+        // Получаем все чанки из базы
+        DocumentChunks.selectAll().forEach { row ->
+            val chunkVector = row[DocumentChunks.vector].toFloatArray()
+
+            // Вычисляем косинусное сходство
+            val similarity = cosineSimilarity(queryEmbedding, chunkVector)
+
+            if (similarity >= minSimilarity) {
+                results.add(SearchResult(
+                    docId = row[DocumentChunks.docId],
+                    chunkIndex = row[DocumentChunks.chunkIndex],
+                    text = row[DocumentChunks.text],
+                    similarity = similarity
+                ))
+            }
+        }
+
+        // Сортируем по убыванию сходства и берем top-K
+        results.sortedByDescending { it.similarity }.take(topK)
+    }
+}
+```
+
+2. cosineSimilarity() - вычисление сходства векторов
+
+```kotlin
+private fun cosineSimilarity(a: FloatArray, b: FloatArray): Double {
+    require(a.size == b.size) { "Vectors must have same dimension" }
+
+    var dotProduct = 0.0
+    var normA = 0.0
+    var normB = 0.0
+
+    for (i in a.indices) {
+        dotProduct += a[i] * b[i]
+        normA += a[i] * a[i]
+        normB += b[i] * b[i]
+    }
+
+    normA = sqrt(normA)
+    normB = sqrt(normB)
+
+    return if (normA > 0 && normB > 0) {
+        dotProduct / (normA * normB)
+    } else {
+        0.0
+    }
+}
+```
+
+3. formatContext() - форматирование результатов в Markdown
+
+```kotlin
+fun formatContext(results: List<SearchResult>): String {
+    if (results.isEmpty()) return ""
+
+    return buildString {
+        appendLine("# 📚 Контекст из документации")
+        appendLine()
+        appendLine("Найдено ${results.size} релевантных фрагментов")
+        appendLine()
+
+        results.forEachIndexed { index, result ->
+            val fileName = result.docId.substringAfterLast('/')
+            val similarityPercent = (result.similarity * 100).toInt()
+
+            appendLine("## 📄 Фрагмент ${index + 1}: $fileName")
+            appendLine("**Источник:** `${result.docId}`")
+            appendLine("**Релевантность:** $similarityPercent%")
+            appendLine()
+            appendLine(result.text.trim())
+            appendLine()
+            appendLine("---")
+            appendLine()
+        }
+    }
+}
+```
+
+Особенности:
+- Использует отдельную RAG базу данных (rag_index.db)
+- Полное сканирование всех чанков (для небольших баз данных)
+- Нормализованные векторы в диапазоне [0, 1]
+- Форматированный вывод с метаданными
+
+
+
+КОМПОНЕНТ: MCPTools.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/mcp/MCPTools.kt
+Строк: 134
+Назначение: Центральный менеджер для всех MCP tools (local + remote)
+
+Архитектура:
+
+```
+MCPTools
+├── LocalMcpProvider (выполняются на сервере)
+│   ├── ActionPlannerMcp
+│   ├── WeatherMcp
+│   ├── SolarActivityMcp
+│   ├── ChatSummaryMcp
+│   ├── ReminderMcp
+│   ├── GitRepositoryMcp
+│   └── HelpMcp (RAG)
+│
+└── RemoteMcpProvider (выполняются на клиенте через WebSocket)
+    ├── AndroidStudioLocalMcp
+    ├── AirTicketsMcp
+    └── ... (другие remote tools)
+```
+
+Ключевые методы:
+
+1. callLocalTool() - выполнение local tool
+
+```kotlin
+suspend fun callLocalTool(
+    toolName: String,
+    input: JsonObject,
+    clientIp: String? = null,
+    userLocation: UserLocation? = null,
+    sessionId: String? = null
+): String {
+    return localMcpProvider.callTool(
+        toolName, input, clientIp, userLocation, sessionId
+    )
+}
+```
+
+2. callRemoteTool() - выполнение remote tool через WebSocket
+
+```kotlin
+suspend fun callRemoteTool(
+    toolName: String,
+    input: JsonObject,
+    sessionId: String
+): String {
+    // Отправка команды на localAgentClient
+    val command = RemoteToolCommand(
+        toolName = toolName,
+        input = input,
+        sessionId = sessionId
+    )
+
+    localAgentManager.sendCommand(sessionId, command)
+
+    // Ожидание результата (с timeout)
+    return withTimeout(30_000) {
+        localAgentManager.awaitResult(sessionId, toolName)
+    }
+}
+```
+
+3. getLocalToolsSchema() - получение JSON schema для Claude API
+
+```kotlin
+fun getLocalToolsSchema(): List<JsonObject> {
+    return localMcpProvider.getToolsSchema()
+}
+```
+
+Пример schema:
+```json
+{
+  "name": "get_weather",
+  "description": "Get current weather for a location",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "location": {
+        "type": "string",
+        "description": "City name or coordinates"
+      }
+    },
+    "required": ["location"]
+  }
+}
+```
+
+КОМПОНЕНТ: LocalMcpProvider.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/mcp/LocalMcpProvider.kt
+Строк: 89
+Назначение: Провайдер для local MCP tools
+
+Ключевые методы:
+
+```kotlin
+suspend fun callTool(
+    toolName: String,
+    input: JsonObject,
+    clientIp: String? = null,
+    userLocation: UserLocation? = null,
+    sessionId: String? = null
+): String {
+    val tool = tools.find { it.name == toolName }
+        ?: return "❌ Tool not found: $toolName"
+
+    return try {
+        tool.execute(input, clientIp, userLocation, sessionId)
+    } catch (e: Exception) {
+        logger.error("Error executing tool $toolName", e)
+        "❌ Error: ${e.message}"
+    }
+}
+
+fun getToolsSchema(): List<JsonObject> {
+    return tools.map { it.getSchema() }
+}
+```
+
+КОМПОНЕНТ: WeatherMcp.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/mcp/tools/WeatherMcp.kt
+Строк: 178
+Назначение: Получение погоды через OpenWeatherMap API
+
+Ключевые методы:
+
+```kotlin
+override suspend fun execute(
+    input: JsonObject,
+    clientIp: String?,
+    userLocation: UserLocation?,
+    sessionId: String?
+): String {
+    val location = input["location"]?.jsonPrimitive?.content
+
+    // 1. Определение координат
+    val (lat, lon) = if (location.isNullOrBlank()) {
+        // Используем IP geolocation
+        userLocation?.let { it.lat to it.lon }
+            ?: geolocationService.getLocationByIp(clientIp ?: "")
+    } else {
+        // Geocoding по названию города
+        geocodeLocation(location)
+    }
+
+    // 2. Запрос погоды
+    val response = httpClient.get(
+        "https://api.openweathermap.org/data/2.5/weather"
+    ) {
+        parameter("lat", lat)
+        parameter("lon", lon)
+        parameter("appid", apiKey)
+        parameter("units", "metric")
+        parameter("lang", "ru")
+    }
+
+    // 3. Парсинг и форматирование
+    val data = response.body<JsonObject>()
+    return formatWeatherResponse(data)
+}
+```
+
+Формат ответа:
+```
+🌤️ Погода в Москва, RU
+
+🌡️ Температура: 5°C (ощущается как 2°C)
+☁️ Состояние: Облачно
+💨 Ветер: 3 м/с, направление: СЗ
+💧 Влажность: 75%
+🔽 Давление: 1013 гПа
+👁️ Видимость: 10 км
+
+🌅 Восход: 08:30
+🌇 Закат: 16:45
+```
+
+КОМПОНЕНТ: HelpMcp.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/mcp/tools/HelpMcp.kt
+Строк: 142
+Назначение: RAG-based помощь по документации
+
+Ключевые методы:
+
+```kotlin
+override suspend fun execute(
+    input: JsonObject,
+    clientIp: String?,
+    userLocation: UserLocation?,
+    sessionId: String?
+): String {
+    val query = input["query"]?.jsonPrimitive?.content
+        ?: return "❌ Missing 'query' parameter"
+
+    val topK = input["top_k"]?.jsonPrimitive?.intOrNull ?: 3
+    val minSimilarity = input["min_similarity"]?.jsonPrimitive?.doubleOrNull ?: 0.3
+
+    // 1. Генерация embedding для запроса
+    val queryEmbedding = ollamaEmbeddingClient.embed(query)
+
+    // 2. Нормализация
+    val normalizedEmbedding = normalizeToRange(queryEmbedding)
+
+    // 3. Поиск
+    val results = ragService.search(
+        queryEmbedding = normalizedEmbedding,
+        topK = topK,
+        minSimilarity = minSimilarity
+    )
+
+    // 4. Форматирование
+    return if (results.isEmpty()) {
+        "❌ Не найдено релевантных документов для запроса: $query"
+    } else {
+        ragService.formatContext(results)
+    }
+}
+```
+
+Schema:
+```json
+{
+  "name": "help",
+  "description": "Search documentation using RAG (Retrieval-Augmented Generation)",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query"
+      },
+      "top_k": {
+        "type": "integer",
+        "description": "Number of results to return (default: 3)"
+      },
+      "min_similarity": {
+        "type": "number",
+        "description": "Minimum similarity threshold 0-1 (default: 0.3)"
+      }
+    },
+    "required": ["query"]
+  }
+}
+```
+
+КОМПОНЕНТ: ReminderMcp.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/mcp/tools/ReminderMcp.kt
+Строк: 198
+Назначение: Управление напоминаниями
+
+Ключевые методы:
+
+```kotlin
+override suspend fun execute(
+    input: JsonObject,
+    clientIp: String?,
+    userLocation: UserLocation?,
+    sessionId: String?
+): String {
+    val action = input["action"]?.jsonPrimitive?.content
+        ?: return "❌ Missing 'action' parameter"
+
+    return when (action) {
+        "create" -> createReminder(input, sessionId)
+        "list" -> listReminders()
+        "done" -> markDone(input)
+        "delete" -> deleteReminder(input)
+        else -> "❌ Unknown action: $action"
+    }
+}
+
+private fun createReminder(input: JsonObject, sessionId: String?): String {
+    val text = input["text"]?.jsonPrimitive?.content
+        ?: return "❌ Missing 'text' parameter"
+
+    val dueTime = input["due_time"]?.jsonPrimitive?.content
+        ?: return "❌ Missing 'due_time' parameter"
+
+    // Парсинг времени (ISO 8601 или относительное)
+    val dueDate = parseDateTime(dueTime)
+
+    val reminder = Reminder(
+        id = UUID.randomUUID().toString(),
+        text = text,
+        dueTime = dueDate,
+        sessionId = sessionId,
+        notified = false,
+        done = false
+    )
+
+    val success = reminderService.createReminder(reminder)
+
+    return if (success) {
+        "✅ Напоминание создано: $text (срабатывание: ${formatDateTime(dueDate)})"
+    } else {
+        "❌ Ошибка создания напоминания"
+    }
+}
+```
+
+Поддерживаемые форматы времени:
+- ISO 8601: "2024-01-15T14:30:00Z"
+- Относительное: "in 5 minutes", "in 2 hours", "tomorrow at 10:00"
+
+
+================================================================================
+4. RAG ИНДЕКСАЦИЯ (модуль rag)
+================================================================================
+
+КОМПОНЕНТ: Main.kt (rag module)
+Путь: rag/src/main/kotlin/com/clauder/agent/Main.kt
+Строк: 87
+Назначение: CLI утилита для индексации документов
+
+Использование:
+```bash
+./gradlew :rag:run --args="./docs rag_index.db http://localhost:11434"
+```
+
+Параметры:
+1. ./docs - директория с документами (.txt, .md)
+2. rag_index.db - путь к базе данных SQLite
+3. http://localhost:11434 - URL Ollama сервера
+
+Поток выполнения:
+
+```kotlin
+fun main(args: Array<String>) {
+    // 1. Парсинг аргументов
+    val docsDir = args[0]
+    val dbPath = args[1]
+    val ollamaUrl = args[2]
+
+    // 2. Инициализация компонентов
+    val database = DataBase(dbPath)
+    val documentReader = DocumentReader()
+    val ollamaClient = OllamaClient(ollamaUrl)
+
+    // 3. Загрузка документов
+    val documents = documentReader.loadDocuments(docsDir)
+    println("Loaded ${documents.size} documents")
+
+    // 4. Chunking
+    val chunks = documents.flatMap { doc ->
+        TextChunk.splitIntoChunks(
+            text = doc.content,
+            docId = doc.path,
+            chunkSize = 500,
+            overlap = 50
+        )
+    }
+    println("Created ${chunks.size} chunks")
+
+    // 5. Генерация embeddings и сохранение
+    chunks.forEachIndexed { index, chunk ->
+        // Генерация embedding
+        val embedding = ollamaClient.generateEmbedding(chunk.text)
+
+        // Нормализация к диапазону [0, 1]
+        val normalized = normalizeToRange(embedding)
+
+        // Сохранение в БД
+        database.insertChunk(
+            docId = chunk.docId,
+            chunkIndex = chunk.chunkIndex,
+            text = chunk.text,
+            vector = normalized
+        )
+
+        if ((index + 1) % 10 == 0) {
+            println("Processed ${index + 1}/${chunks.size} chunks")
+        }
+    }
+
+    println("✅ Indexing complete!")
+}
+```
+
+КОМПОНЕНТ: TextChunk.kt
+Путь: rag/src/main/kotlin/com/clauder/agent/TextChunk.kt
+Строк: 65
+Назначение: Разбиение текста на чанки с overlap
+
+Ключевые методы:
+
+```kotlin
+data class TextChunk(
+    val docId: String,
+    val chunkIndex: Int,
+    val text: String
+)
+
+companion object {
+    fun splitIntoChunks(
+        text: String,
+        docId: String,
+        chunkSize: Int = 500,
+        overlap: Int = 50
+    ): List<TextChunk> {
+        val chunks = mutableListOf<TextChunk>()
+        var startIndex = 0
+        var chunkIndex = 0
+
+        while (startIndex < text.length) {
+            val endIndex = minOf(startIndex + chunkSize, text.length)
+            val chunkText = text.substring(startIndex, endIndex)
+
+            chunks.add(TextChunk(
+                docId = docId,
+                chunkIndex = chunkIndex++,
+                text = chunkText.trim()
+            ))
+
+            // Сдвиг с учетом overlap
+            startIndex += chunkSize - overlap
+        }
+
+        return chunks
+    }
+}
+```
+
+Параметры chunking:
+- chunkSize: 500 символов (оптимально для embedding models)
+- overlap: 50 символов (для сохранения контекста между чанками)
+
+КОМПОНЕНТ: OllamaClient.kt (rag module)
+Путь: rag/src/main/kotlin/com/clauder/agent/OllamaClient.kt
+Строк: 92
+Назначение: Генерация embeddings через Ollama API
+
+Ключевые методы:
+
+```kotlin
+class OllamaClient(private val baseUrl: String) {
+    private val httpClient = HttpClient(CIO) {
+        install(ContentNegotiation) {
+            json(Json {
+                ignoreUnknownKeys = true
+                isLenient = true
+            })
+        }
+        install(HttpTimeout) {
+            requestTimeoutMillis = 60_000
+        }
+    }
+
+    suspend fun generateEmbedding(text: String): FloatArray {
+        val response = httpClient.post("$baseUrl/api/embeddings") {
+            contentType(ContentType.Application.Json)
+            setBody(JsonObject(mapOf(
+                "model" to JsonPrimitive("nomic-embed-text"),
+                "prompt" to JsonPrimitive(text)
+            )))
+        }
+
+        val jsonResponse = response.body<JsonObject>()
+        val embedding = jsonResponse["embedding"]?.jsonArray
+            ?: throw Exception("No embedding in response")
+
+        return embedding.map { it.jsonPrimitive.float }.toFloatArray()
+    }
+}
+```
+
+Используемая модель: nomic-embed-text
+- Размерность: 768
+- Контекст: 8192 токенов
+- Качество: state-of-the-art для open-source embeddings
+
+КОМПОНЕНТ: DataBase.kt (rag module)
+Путь: rag/src/main/kotlin/com/clauder/agent/DataBase.kt
+Строк: 78
+Назначение: Операции с RAG базой данных
+
+Ключевые методы:
+
+```kotlin
+class DataBase(dbPath: String) {
+    private val database: Database
+
+    init {
+        Database.connect("jdbc:sqlite:$dbPath", "org.sqlite.JDBC")
+        database = DatabaseFactory.getMainDatabase()
+
+        transaction(database) {
+            SchemaUtils.create(DocumentChunks)
+        }
+    }
+
+    fun insertChunk(
+        docId: String,
+        chunkIndex: Int,
+        text: String,
+        vector: FloatArray
+    ) {
+        transaction(database) {
+            DocumentChunks.insert {
+                it[DocumentChunks.docId] = docId
+                it[DocumentChunks.chunkIndex] = chunkIndex
+                it[DocumentChunks.text] = text
+                it[DocumentChunks.vector] = vector.toByteArray()
+            }
+        }
+    }
+
+    fun clearAll() {
+        transaction(database) {
+            DocumentChunks.deleteAll()
+        }
+    }
+}
+```
+
+Схема таблицы DocumentChunks (из common/RagTables.kt):
+```kotlin
+object DocumentChunks : Table("document_chunks") {
+    val id = integer("id").autoIncrement()
+    val docId = varchar("doc_id", 512)
+    val chunkIndex = integer("chunk_index")
+    val text = text("text")
+    val vector = blob("vector")  // FloatArray serialized to ByteArray
+
+    override val primaryKey = PrimaryKey(id)
+}
+```
+
+Конвертация FloatArray ↔ ByteArray:
+```kotlin
+fun FloatArray.toByteArray(): ByteArray {
+    val buffer = ByteBuffer.allocate(this.size * 4)
+    buffer.order(ByteOrder.LITTLE_ENDIAN)
+    this.forEach { buffer.putFloat(it) }
+    return buffer.array()
+}
+
+fun ByteArray.toFloatArray(): FloatArray {
+    val buffer = ByteBuffer.wrap(this)
+    buffer.order(ByteOrder.LITTLE_ENDIAN)
+    val floatArray = FloatArray(this.size / 4)
+    for (i in floatArray.indices) {
+        floatArray[i] = buffer.getFloat()
+    }
+    return floatArray
+}
+```
+
+
+
+================================================================================
+5. WEBSOCKET И REAL-TIME UPDATES
+================================================================================
+
+КОМПОНЕНТ: WebSocketService.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/websocket/WebSocketService.kt
+Строк: 112
+Назначение: Управление WebSocket соединениями для real-time updates
+
+Ключевые методы:
+
+```kotlin
+class WebSocketService {
+    private val sessions = ConcurrentHashMap<String, MutableSet<WebSocketSession>>()
+
+    // Регистрация нового соединения
+    suspend fun registerSession(sessionId: String, wsSession: WebSocketSession) {
+        sessions.computeIfAbsent(sessionId) {
+            Collections.synchronizedSet(mutableSetOf())
+        }.add(wsSession)
+
+        logger.info("WebSocket registered for session: $sessionId")
+    }
+
+    // Удаление соединения
+    suspend fun unregisterSession(sessionId: String, wsSession: WebSocketSession) {
+        sessions[sessionId]?.remove(wsSession)
+        if (sessions[sessionId]?.isEmpty() == true) {
+            sessions.remove(sessionId)
+        }
+
+        logger.info("WebSocket unregistered for session: $sessionId")
+    }
+
+    // Отправка сообщения всем клиентам сессии
+    suspend fun broadcastToSession(sessionId: String, message: WebSocketMessage) {
+        val wsSessions = sessions[sessionId] ?: return
+
+        val json = Json.encodeToString(message)
+
+        wsSessions.forEach { wsSession ->
+            try {
+                wsSession.send(Frame.Text(json))
+            } catch (e: Exception) {
+                logger.error("Error sending WebSocket message", e)
+            }
+        }
+    }
+}
+```
+
+Типы WebSocket сообщений:
+
+```kotlin
+@Serializable
+data class WebSocketMessage(
+    val type: String,  // "tool_result", "reminder", "message_update", "error"
+    val sessionId: String?,
+    val data: String
+)
+```
+
+Примеры использования:
+
+1. Tool execution update:
+```kotlin
+webSocketService.broadcastToSession(sessionId, WebSocketMessage(
+    type = "tool_result",
+    sessionId = sessionId,
+    data = Json.encodeToString(mapOf(
+        "tool_name" to "get_weather",
+        "result" to "🌤️ Погода в Москва: 5°C"
+    ))
+))
+```
+
+2. Reminder notification:
+```kotlin
+webSocketService.broadcastToSession(sessionId, WebSocketMessage(
+    type = "reminder",
+    sessionId = sessionId,
+    data = Json.encodeToString(mapOf(
+        "reminder_id" to reminderId,
+        "text" to "Встреча через 5 минут"
+    ))
+))
+```
+
+КОМПОНЕНТ: LocalAgentManager.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/websocket/LocalAgentManager.kt
+Строк: 156
+Назначение: Управление WebSocket соединениями с localAgentClient
+
+Ключевые методы:
+
+```kotlin
+class LocalAgentManager {
+    private val connections = ConcurrentHashMap<String, WebSocketSession>()
+    private val pendingResults = ConcurrentHashMap<String, CompletableDeferred<String>>()
+
+    // Обработка нового соединения от localAgentClient
+    suspend fun handleConnection(wsSession: WebSocketSession) {
+        val agentId = UUID.randomUUID().toString()
+        connections[agentId] = wsSession
+
+        try {
+            for (frame in wsSession.incoming) {
+                when (frame) {
+                    is Frame.Text -> {
+                        val message = Json.decodeFromString<RemoteToolResult>(
+                            frame.readText()
+                        )
+                        handleToolResult(message)
+                    }
+                    else -> {}
+                }
+            }
+        } finally {
+            connections.remove(agentId)
+        }
+    }
+
+    // Отправка команды на выполнение remote tool
+    suspend fun sendCommand(sessionId: String, command: RemoteToolCommand) {
+        val wsSession = connections.values.firstOrNull()
+            ?: throw Exception("No local agent connected")
+
+        val json = Json.encodeToString(command)
+        wsSession.send(Frame.Text(json))
+
+        // Создаем deferred для ожидания результата
+        val key = "${sessionId}_${command.toolName}"
+        pendingResults[key] = CompletableDeferred()
+    }
+
+    // Ожидание результата выполнения
+    suspend fun awaitResult(sessionId: String, toolName: String): String {
+        val key = "${sessionId}_${toolName}"
+        val deferred = pendingResults[key]
+            ?: throw Exception("No pending result for $key")
+
+        return deferred.await()
+    }
+
+    // Обработка результата от localAgentClient
+    private fun handleToolResult(result: RemoteToolResult) {
+        val key = "${result.sessionId}_${result.toolName}"
+        val deferred = pendingResults.remove(key)
+
+        deferred?.complete(result.result)
+    }
+}
+```
+
+Протокол взаимодействия:
+
+1. Server → LocalAgent (команда):
+```json
+{
+  "toolName": "android_studio_open_project",
+  "input": {
+    "project_path": "/path/to/project"
+  },
+  "sessionId": "abc123"
+}
+```
+
+2. LocalAgent → Server (результат):
+```json
+{
+  "toolName": "android_studio_open_project",
+  "sessionId": "abc123",
+  "result": "✅ Project opened successfully"
+}
+```
+
+================================================================================
+6. TOKEN OPTIMIZATION
+================================================================================
+
+КОМПОНЕНТ: TokenMetricsService.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/service/TokenMetricsService.kt
+Строк: 145
+Назначение: Сбор и анализ метрик использования токенов
+
+Ключевые методы:
+
+```kotlin
+class TokenMetricsService {
+    private val metrics = ConcurrentHashMap<String, TokenMetric>()
+
+    data class TokenMetric(
+        val timestamp: Long,
+        val inputTokens: Int,
+        val outputTokens: Int,
+        val cacheCreationTokens: Int,
+        val cacheReadTokens: Int,
+        val model: String,
+        val sessionId: String?
+    )
+
+    fun recordMetric(
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheCreationTokens: Int = 0,
+        cacheReadTokens: Int = 0,
+        model: String,
+        sessionId: String? = null
+    ) {
+        val metric = TokenMetric(
+            timestamp = System.currentTimeMillis(),
+            inputTokens = inputTokens,
+            outputTokens = outputTokens,
+            cacheCreationTokens = cacheCreationTokens,
+            cacheReadTokens = cacheReadTokens,
+            model = model,
+            sessionId = sessionId
+        )
+
+        metrics[UUID.randomUUID().toString()] = metric
+    }
+
+    fun getMetrics(
+        startTime: Long? = null,
+        endTime: Long? = null,
+        sessionId: String? = null
+    ): List<TokenMetric> {
+        return metrics.values.filter { metric ->
+            (startTime == null || metric.timestamp >= startTime) &&
+            (endTime == null || metric.timestamp <= endTime) &&
+            (sessionId == null || metric.sessionId == sessionId)
+        }.sortedByDescending { it.timestamp }
+    }
+
+    fun getAggregatedStats(): TokenStats {
+        val allMetrics = metrics.values
+
+        return TokenStats(
+            totalInputTokens = allMetrics.sumOf { it.inputTokens },
+            totalOutputTokens = allMetrics.sumOf { it.outputTokens },
+            totalCacheCreationTokens = allMetrics.sumOf { it.cacheCreationTokens },
+            totalCacheReadTokens = allMetrics.sumOf { it.cacheReadTokens },
+            requestCount = allMetrics.size,
+            cacheHitRate = calculateCacheHitRate(allMetrics)
+        )
+    }
+
+    private fun calculateCacheHitRate(metrics: Collection<TokenMetric>): Double {
+        val totalCacheableTokens = metrics.sumOf {
+            it.cacheCreationTokens + it.cacheReadTokens
+        }
+
+        return if (totalCacheableTokens > 0) {
+            metrics.sumOf { it.cacheReadTokens }.toDouble() / totalCacheableTokens
+        } else {
+            0.0
+        }
+    }
+}
+```
+
+КОМПОНЕНТ: ToolsFilterService.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/service/ToolsFilterService.kt
+Строк: 98
+Назначение: Динамическая фильтрация tools для уменьшения размера промпта
+
+Ключевые методы:
+
+```kotlin
+class ToolsFilterService {
+    // Ключевые слова для каждого tool
+    private val toolKeywords = mapOf(
+        "get_weather" to listOf("погода", "температура", "weather", "forecast"),
+        "get_solar_activity" to listOf("солнце", "магнитная буря", "solar", "aurora"),
+        "create_reminder" to listOf("напомни", "reminder", "напоминание"),
+        "help" to listOf("помощь", "документация", "help", "docs"),
+        "git_status" to listOf("git", "репозиторий", "коммит", "branch"),
+        "android_studio_open_project" to listOf("android", "студия", "проект")
+    )
+
+    fun filterTools(
+        allTools: List<JsonObject>,
+        userMessage: String,
+        enabledTools: List<String> = emptyList()
+    ): List<JsonObject> {
+        // Если указаны конкретные tools, используем только их
+        if (enabledTools.isNotEmpty()) {
+            return allTools.filter { tool ->
+                tool["name"]?.jsonPrimitive?.content in enabledTools
+            }
+        }
+
+        // Динамическая фильтрация по ключевым словам
+        val messageLower = userMessage.lowercase()
+
+        return allTools.filter { tool ->
+            val toolName = tool["name"]?.jsonPrimitive?.content ?: return@filter false
+            val keywords = toolKeywords[toolName] ?: return@filter true
+
+            keywords.any { keyword -> messageLower.contains(keyword) }
+        }
+    }
+}
+```
+
+Пример:
+- User message: "Какая сейчас погода?"
+- Filtered tools: только get_weather (вместо всех 10+ tools)
+- Экономия: ~500-1000 токенов на запрос
+
+
+
+================================================================================
+7. API ROUTES
+================================================================================
+
+КОМПОНЕНТ: ChatRoutes.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/routes/ChatRoutes.kt
+Строк: 234
+Назначение: HTTP endpoints для чата
+
+Основные endpoints:
+
+1. POST /api/chat - отправка сообщения
+
+Request:
+```json
+{
+  "message": "Какая сейчас погода?",
+  "sessionId": "abc123",
+  "model": "claude-sonnet-4-20250514",
+  "maxTokens": 8000,
+  "temperature": 1.0,
+  "enabledTools": [],
+  "useRag": false,
+  "ragTopK": 3,
+  "ragMinSimilarity": 0.3
+}
+```
+
+Response:
+```json
+{
+  "response": "🌤️ Погода в Москва: 5°C, облачно",
+  "tokenUsage": {
+    "inputTokens": 1234,
+    "outputTokens": 567,
+    "cacheCreationTokens": 0,
+    "cacheReadTokens": 890
+  },
+  "sessionId": "abc123"
+}
+```
+
+2. GET /api/chat/history/{sessionId} - получение истории
+
+Response:
+```json
+{
+  "sessionId": "abc123",
+  "messages": [
+    {
+      "id": 1,
+      "role": "user",
+      "content": "Привет!",
+      "timestamp": "2024-01-15T10:30:00Z",
+      "inputTokens": null,
+      "outputTokens": null
+    },
+    {
+      "id": 2,
+      "role": "assistant",
+      "content": "Здравствуйте! Чем могу помочь?",
+      "timestamp": "2024-01-15T10:30:05Z",
+      "inputTokens": 1234,
+      "outputTokens": 567
+    }
+  ],
+  "totalMessages": 2,
+  "totalTokens": 1801
+}
+```
+
+3. POST /api/chat/compress/{sessionId} - сжатие истории
+
+Response:
+```json
+{
+  "success": true,
+  "originalMessages": 50,
+  "compressedMessages": 5,
+  "savedTokens": 12000
+}
+```
+
+КОМПОНЕНТ: SessionRoutes.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/routes/SessionRoutes.kt
+Строк: 89
+Назначение: Управление сессиями
+
+Endpoints:
+
+1. POST /api/sessions - создание сессии
+
+Request:
+```json
+{
+  "title": "Новый чат"
+}
+```
+
+Response:
+```json
+{
+  "sessionId": "abc123",
+  "title": "Новый чат",
+  "createdAt": "2024-01-15T10:30:00Z"
+}
+```
+
+2. GET /api/sessions - список всех сессий
+
+Response:
+```json
+{
+  "sessions": [
+    {
+      "sessionId": "abc123",
+      "title": "Новый чат",
+      "lastUpdated": "2024-01-15T10:30:00Z",
+      "messageCount": 10,
+      "unreadCount": 2
+    }
+  ]
+}
+```
+
+3. DELETE /api/sessions/{sessionId} - удаление сессии
+
+Response:
+```json
+{
+  "success": true
+}
+```
+
+КОМПОНЕНТ: RagRoutes.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/routes/RagRoutes.kt
+Строк: 67
+Назначение: RAG endpoints
+
+Endpoints:
+
+1. POST /api/rag/search - поиск по документации
+
+Request:
+```json
+{
+  "query": "Как настроить RAG?",
+  "topK": 3,
+  "minSimilarity": 0.3
+}
+```
+
+Response:
+```json
+{
+  "results": [
+    {
+      "docId": "docs/rag_setup.md",
+      "chunkIndex": 0,
+      "text": "Для настройки RAG нужно...",
+      "similarity": 0.85
+    }
+  ]
+}
+```
+
+КОМПОНЕНТ: MetricsRoutes.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/routes/MetricsRoutes.kt
+Строк: 78
+Назначение: Метрики использования токенов
+
+Endpoints:
+
+1. GET /api/metrics/tokens - статистика токенов
+
+Response:
+```json
+{
+  "totalInputTokens": 123456,
+  "totalOutputTokens": 67890,
+  "totalCacheCreationTokens": 45000,
+  "totalCacheReadTokens": 89000,
+  "requestCount": 150,
+  "cacheHitRate": 0.66,
+  "estimatedCost": {
+    "withoutCache": 12.50,
+    "withCache": 4.20,
+    "savings": 8.30
+  }
+}
+```
+
+================================================================================
+8. КОНФИГУРАЦИЯ
+================================================================================
+
+КОМПОНЕНТ: AppConfig.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/config/AppConfig.kt
+
+```kotlin
+object AppConfig {
+    val host: String = System.getenv("HOST") ?: "0.0.0.0"
+    val port: Int = System.getenv("PORT")?.toIntOrNull() ?: 8000
+    val environment: String = System.getenv("ENVIRONMENT") ?: "development"
+}
+```
+
+КОМПОНЕНТ: ClaudeConfig.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/config/ClaudeConfig.kt
+
+```kotlin
+object ClaudeConfig {
+    val API_KEY: String = System.getenv("ANTHROPIC_API_KEY")
+        ?: throw IllegalStateException("ANTHROPIC_API_KEY not set")
+
+    const val MODEL = "claude-sonnet-4-20250514"
+    const val MAX_TOKENS = 8000
+    const val API_URL = "https://api.anthropic.com/v1/messages"
+}
+```
+
+КОМПОНЕНТ: PromptCachingConfig.kt
+Путь: remoteAgentServer/src/main/kotlin/com/claude/agent/config/PromptCachingConfig.kt
+
+```kotlin
+object PromptCachingConfig {
+    const val ENABLED = true
+    const val MIN_TOKENS_FOR_CACHING = 1024
+    const val CACHE_TTL_MINUTES = 5
+}
+```
+
+Переменные окружения (.env):
+
+```bash
+# Claude API
+ANTHROPIC_API_KEY=sk-ant-...
+
+# OpenWeatherMap API
+OPENWEATHER_API_KEY=...
+
+# Server
+HOST=0.0.0.0
+PORT=8000
+ENVIRONMENT=production
+
+# Database
+DATABASE_PATH=./data/conversations.db
+RAG_DATABASE_PATH=./data/rag_index.db
+
+# Ollama
+OLLAMA_URL=http://localhost:11434
+```
+
+================================================================================
+9. ПРИМЕРЫ ИСПОЛЬЗОВАНИЯ
+================================================================================
+
+ПРИМЕР 1: Простой запрос без tools
+
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Привет! Как дела?",
+    "sessionId": "test-session"
+  }'
+```
+
+ПРИМЕР 2: Запрос с использованием weather tool
+
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Какая сейчас погода в Москве?",
+    "sessionId": "test-session",
+    "enabledTools": ["get_weather"]
+  }'
+```
+
+Поток выполнения:
+1. Claude анализирует запрос
+2. Решает использовать get_weather tool
+3. Вызывает tool с параметром location="Москва"
+4. Получает результат от OpenWeatherMap API
+5. Форматирует ответ пользователю
+
+ПРИМЕР 3: Запрос с RAG
+
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Как настроить RAG индексацию?",
+    "sessionId": "test-session",
+    "useRag": true,
+    "ragTopK": 3,
+    "ragMinSimilarity": 0.3
+  }'
+```
+
+Поток выполнения:
+1. Генерация embedding для запроса через Ollama
+2. Поиск top-3 релевантных чанков в rag_index.db
+3. Добавление контекста в промпт с cache_control
+4. Отправка в Claude API
+5. Claude отвечает на основе найденной документации
+
+ПРИМЕР 4: Создание напоминания
+
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Напомни мне через 5 минут проверить почту",
+    "sessionId": "test-session",
+    "enabledTools": ["create_reminder"]
+  }'
+```
+
+Поток выполнения:
+1. Claude парсит запрос
+2. Вызывает create_reminder tool с параметрами:
+   - text: "проверить почту"
+   - due_time: "in 5 minutes"
+3. ReminderService создает напоминание в БД
+4. Через 5 минут ReminderService отправляет WebSocket уведомление
+5. UI показывает push-notification
+
+ПРИМЕР 5: Индексация документов
+
+```bash
+# 1. Запуск Ollama с nomic-embed-text
+ollama pull nomic-embed-text
+
+# 2. Создание директории с документами
+mkdir docs
+echo "RAG (Retrieval-Augmented Generation) - это..." > docs/rag_intro.md
+
+# 3. Запуск индексации
+./gradlew :rag:run --args="./docs rag_index.db http://localhost:11434"
+```
+
+Вывод:
+```
+Loaded 1 documents
+Created 5 chunks
+Processed 5/5 chunks
+✅ Indexing complete!
+```
+
+================================================================================
+10. TROUBLESHOOTING
+================================================================================
+
+ПРОБЛЕМА: "No embedding in response" при индексации
+
+Решение:
+1. Проверить, что Ollama запущен: `curl http://localhost:11434/api/tags`
+2. Проверить, что модель загружена: `ollama list`
+3. Загрузить модель: `ollama pull nomic-embed-text`
+
+ПРОБЛЕМА: RAG не находит релевантные документы
+
+Решение:
+1. Проверить нормализацию векторов (должна быть одинаковая при индексации и поиске)
+2. Снизить порог minSimilarity (например, с 0.9 до 0.3)
+3. Увеличить topK (например, с 3 до 10)
+4. Проверить, что документы действительно проиндексированы:
+   ```sql
+   sqlite3 rag_index.db "SELECT COUNT(*) FROM document_chunks;"
+   ```
+
+ПРОБЛЕМА: "Tool loop detected"
+
+Решение:
+1. Проверить логику tool - возможно, он возвращает некорректный результат
+2. Увеличить LOOP_DETECTION_THRESHOLD в ClaudeClient.kt
+3. Добавить более детальное описание в tool schema
+
+ПРОБЛЕМА: Высокое потребление токенов
+
+Решение:
+1. Включить prompt caching (PromptCachingConfig.ENABLED = true)
+2. Использовать динамическую фильтрацию tools (ToolsFilterService)
+3. Сжимать историю чата (HistoryCompressor)
+4. Проверить метрики: `curl http://localhost:8000/api/metrics/tokens`
+
+ПРОБЛЕМА: WebSocket соединение разрывается
+
+Решение:
+1. Проверить настройки pingPeriod и timeout в ApplicationServer.kt
+2. Проверить firewall/proxy настройки
+3. Увеличить timeout на клиенте
+
+================================================================================
+11. ДАЛЬНЕЙШЕЕ РАЗВИТИЕ
+================================================================================
+
+Планируемые улучшения:
+
+1. RAG:
+   - Использование vector database (Qdrant, Milvus) вместо SQLite
+   - Hybrid search (keyword + semantic)
+   - Reranking моделей для улучшения качества
+
+2. Tools:
+   - Больше интеграций (Jira, Slack, GitHub)
+   - Поддержка custom tools через конфигурацию
+   - Tool composition (цепочки tools)
+
+3. UI:
+   - Markdown rendering с syntax highlighting
+   - Voice input/output
+   - Мобильное приложение
+
+4. Performance:
+   - Кэширование embeddings
+   - Batch processing для индексации
+   - Streaming responses
+
+5. Security:
+   - Аутентификация и авторизация
+   - Rate limiting
+   - Шифрование данных в БД
+
+================================================================================
+КОНЕЦ ДОКУМЕНТА
+================================================================================
+

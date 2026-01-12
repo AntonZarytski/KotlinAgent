@@ -15,7 +15,8 @@ data class Message(
     val content: String,
     val usage: TokenUsage? = null,
     val timestamp: String? = null,  // ISO 8601 timestamp
-    val read: Boolean = false       // Прочитано ли сообщение
+    val read: Boolean = false,      // Прочитано ли сообщение
+    val is_intermediate: Boolean = false  // Промежуточное сообщение (не сохраняется в историю)
 )
 
 @Serializable

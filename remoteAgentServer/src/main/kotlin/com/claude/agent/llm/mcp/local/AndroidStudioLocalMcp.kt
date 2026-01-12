@@ -5,13 +5,8 @@ import com.claude.agent.llm.mcp.ANDROID_STUDIO_MCP
 import com.claude.agent.llm.mcp.Mcp
 import com.claude.agent.models.UserLocation
 import com.claude.agent.service.LocalAgentManager
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
+import com.claude.agent.service.ProjectPathService
+import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
 
 /**
@@ -241,7 +236,7 @@ class AndroidStudioLocalMcp : Mcp.Local {
         val action = arguments["action"]?.jsonPrimitive?.content
             ?: return errorJson("Missing required parameter: action")
 
-        logger.info("Android Studio tool called: action=$action, arguments=$arguments")
+        logger.info("Android Studio tool called: action=$action, sessionId=$sessionId")
 
         return try {
             // Determine timeout based on action
@@ -259,6 +254,21 @@ class AndroidStudioLocalMcp : Mcp.Local {
             )
 
             logger.info("Android Studio tool result: $result")
+
+            // 🆕 Синхронизация пути проекта с ProjectPathService
+            if (action == "set_project_path" && !result.contains("\"error\"")) {
+                try {
+                    val resultJson = Json.parseToJsonElement(result).jsonObject
+                    val projectPath = resultJson["project_path"]?.jsonPrimitive?.content
+                    if (projectPath != null) {
+                        ProjectPathService.setProjectPath(sessionId, projectPath)
+                        logger.info("✅ Project path synchronized with ProjectPathService: $projectPath")
+                    }
+                } catch (e: Exception) {
+                    logger.warn("⚠️ Failed to sync project path with ProjectPathService: ${e.message}")
+                }
+            }
+
             result
         } catch (e: Exception) {
             logger.error("Error executing Android Studio tool: ${e.message}", e)

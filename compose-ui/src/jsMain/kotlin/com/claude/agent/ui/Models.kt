@@ -8,7 +8,8 @@ data class Message(
     val content: String,
     val timestamp: String? = null,
     val usage: TokenUsage? = null,
-    val read: Boolean = false
+    val read: Boolean = false,
+    val is_intermediate: Boolean = false  // Флаг для промежуточных сообщений
 )
 
 @Serializable

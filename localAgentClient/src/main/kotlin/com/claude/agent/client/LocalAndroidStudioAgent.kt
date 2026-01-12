@@ -272,6 +272,7 @@ class LocalAndroidStudioAgent(
 
         val toolDef = LocalToolDefinition(
             name = "android_studio",
+            ui_description = "Этот инструмент управляет Android Studio, Android Emulator, ADB, Gradle и ЛОКАЛЬНОЙ ФАЙЛОВОЙ СИСТЕМОЙ на ПОДКЛЮЧЁННОМ КОМПЬЮТЕРЕ РАЗРАБОТЧИКА.",
             description = """
                 Control Android Studio emulator, build projects, and execute ADB commands.
                 Project path: ${androidProjectPath ?: "Not configured"}

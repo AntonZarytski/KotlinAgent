@@ -13,6 +13,7 @@ version = "unspecified"
 
 repositories {
     mavenCentral()
+    google()
     maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
 }
 
@@ -77,6 +78,8 @@ val generateBuildInfo by tasks.registering {
     val outputFile = outputDir.get().file("BuildInfo.kt")
 
     outputs.file(outputFile)
+    // Всегда выполнять задачу, чтобы обновлять время сборки
+//    outputs.upToDateWhen { false }
 
     doLast {
         val timestamp = LocalDateTime.now()
@@ -102,3 +105,28 @@ kotlin.sourceSets.named("jsMain") {
 tasks.named("compileKotlinJs") {
     dependsOn(generateBuildInfo)
 }
+
+// Отключаем кеширование для всех задач сборки, чтобы BuildInfo всегда обновлялся
+//tasks.configureEach {
+//    outputs.upToDateWhen { false }
+//}
+
+// Очищаем webpack кеш и dist перед production сборкой
+// Это гарантирует, что BuildInfo.kt всегда попадёт в финальный bundle
+val cleanWebpackCache by tasks.registering(Delete::class) {
+    delete(layout.buildDirectory.dir("kotlin-webpack"))
+    delete(layout.buildDirectory.dir("dist"))
+}
+
+tasks.named("jsBrowserProductionWebpack") {
+    dependsOn(cleanWebpackCache)
+}
+
+//// Создаём алиас jsBrowserRun для удобства разработки
+//// Kotlin/JS создаёт два отдельных таска: jsBrowserDevelopmentRun и jsBrowserProductionRun
+//// Этот алиас указывает на development версию для локальной разработки
+//tasks.register("jsBrowserRun") {
+//    group = "run"
+//    description = "Alias for jsBrowserDevelopmentRun (development mode)"
+//    dependsOn("jsBrowserDevelopmentRun")
+//}

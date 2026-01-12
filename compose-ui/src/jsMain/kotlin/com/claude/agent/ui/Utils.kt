@@ -100,10 +100,14 @@ object Utils {
         var codeBlockCounter = 0
         var html = text
 
-        html = html.replace(Regex("```(\\w*)\\n([\\s\\S]*?)\\n```")) { match ->
+        // Улучшенное регулярное выражение для блоков кода:
+        // - Поддерживает блоки с языком и без
+        // - Не требует обязательный \n перед закрывающими ```
+        // - Обрабатывает случаи когда ``` идут сразу после текста
+        html = html.replace(Regex("```(\\w*)\n([\\s\\S]*?)```", RegexOption.MULTILINE)) { match ->
             val lang = match.groupValues[1].ifEmpty { "code" }
-            val code = escapeHtml(match.groupValues[2])
-            val placeholder = "___CODE_BLOCK_${codeBlockCounter++}___"
+            val code = escapeHtml(match.groupValues[2].trimEnd())
+            val placeholder = "\n___CODE_BLOCK_${codeBlockCounter++}___\n"
 
             codeBlocks[placeholder] = "<div class=\"code-block-wrapper\">" +
                 "<div class=\"code-block-header\">" +
@@ -118,59 +122,214 @@ object Utils {
             placeholder
         }
 
-        // Шаг 2: Экранируем весь остальной текст (плейсхолдеры останутся как есть)
-        html = escapeHtml(html)
+        // Шаг 2: Обрабатываем таблицы
+        val tableBlocks = mutableMapOf<String, String>()
+        var tableBlockCounter = 0
+
+        // Находим таблицы (строки, начинающиеся с |)
+        val tableRegex = Regex("^\\|.+\\|\\s*$", RegexOption.MULTILINE)
+        val allLines = html.split("\n")
+        val processedTableLines = mutableListOf<String>()
+        var i = 0
+
+        while (i < allLines.size) {
+            val line = allLines[i]
+
+            // Проверяем, начинается ли таблица
+            if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+                val tableLines = mutableListOf<String>()
+                var j = i
+
+                // Собираем все строки таблицы
+                while (j < allLines.size && allLines[j].trim().startsWith("|") && allLines[j].trim().endsWith("|")) {
+                    tableLines.add(allLines[j])
+                    j++
+                }
+
+                // Если нашли хотя бы 2 строки (заголовок + разделитель или заголовок + данные)
+                if (tableLines.size >= 2) {
+                    val placeholder = "\n___TABLE_BLOCK_${tableBlockCounter++}___\n"
+                    tableBlocks[placeholder] = buildTable(tableLines)
+                    processedTableLines.add(placeholder)
+                    i = j
+                    continue
+                }
+            }
+
+            processedTableLines.add(line)
+            i++
+        }
+
+        html = processedTableLines.joinToString("\n")
+
+        // Шаг 3: Разбиваем на строки для обработки
+        val lines = html.split("\n")
+        val processedLines = mutableListOf<String>()
+
+        for (line in lines) {
+            // Пропускаем плейсхолдеры блоков кода и таблиц
+            if (line.trim().startsWith("___CODE_BLOCK_") || line.trim().startsWith("___TABLE_BLOCK_")) {
+                processedLines.add(line)
+                continue
+            }
+
+            // Экранируем HTML в строке
+            var processedLine = escapeHtml(line)
+
+            // Inline code (должно быть до bold/italic чтобы не конфликтовать)
+            processedLine = processedLine.replace(Regex("`([^`]+)`")) { match ->
+                "<code>${match.groupValues[1]}</code>"
+            }
+
+            // Bold
+            processedLine = processedLine.replace(Regex("\\*\\*([^*]+)\\*\\*")) { match ->
+                "<strong>${match.groupValues[1]}</strong>"
+            }
+
+            // Italic
+            processedLine = processedLine.replace(Regex("\\*([^*]+)\\*")) { match ->
+                "<em>${match.groupValues[1]}</em>"
+            }
+
+            // Headers
+            processedLine = when {
+                processedLine.startsWith("### ") -> "<h3>${processedLine.substring(4)}</h3>"
+                processedLine.startsWith("## ") -> "<h2>${processedLine.substring(3)}</h2>"
+                processedLine.startsWith("# ") -> "<h1>${processedLine.substring(2)}</h1>"
+                else -> processedLine
+            }
+
+            // Links
+            processedLine = processedLine.replace(Regex("\\[([^\\]]+)\\]\\(([^)]+)\\)")) { match ->
+                "<a href=\"${match.groupValues[2]}\" target=\"_blank\">${match.groupValues[1]}</a>"
+            }
+
+            // Lists
+            if (processedLine.trimStart().startsWith("- ")) {
+                val indent = processedLine.takeWhile { it == ' ' }.length
+                val content = processedLine.trimStart().substring(2)
+                processedLine = "${"  ".repeat(indent / 2)}<li>$content</li>"
+            }
+
+            processedLines.add(processedLine)
+        }
+
+        // Объединяем строки обратно
+        html = processedLines.joinToString("\n")
+
+        // Оборачиваем списки в <ul>
+        html = html.replace(Regex("(<li>.*?</li>\n?)+", RegexOption.MULTILINE)) { match ->
+            "<ul>${match.value}</ul>"
+        }
+
+        // Paragraphs - оборачиваем непустые строки, которые не являются тегами или плейсхолдерами
+        html = html.split("\n").joinToString("\n") { line ->
+            val trimmed = line.trim()
+            when {
+                trimmed.isEmpty() -> ""
+                trimmed.startsWith("<") -> line  // Уже HTML тег
+                trimmed.startsWith("___CODE_BLOCK_") -> line  // Плейсхолдер кода
+                trimmed.startsWith("___TABLE_BLOCK_") -> line  // Плейсхолдер таблицы
+                trimmed == "---" -> "<hr/>"  // Горизонтальная линия
+                else -> "<p>$line</p>"
+            }
+        }
+
+        // Шаг 4: Возвращаем блоки кода и таблиц обратно в конце
+        codeBlocks.forEach { (placeholder, codeHtml) ->
+            html = html.replace(placeholder.trim(), codeHtml)
+        }
+
+        tableBlocks.forEach { (placeholder, tableHtml) ->
+            html = html.replace(placeholder.trim(), tableHtml)
+        }
+
+        return html
+    }
+
+    /**
+     * Построение HTML таблицы из markdown строк
+     */
+    private fun buildTable(lines: List<String>): String {
+        if (lines.isEmpty()) return ""
+
+        val rows = lines.map { line ->
+            line.trim()
+                .removePrefix("|")
+                .removeSuffix("|")
+                .split("|")
+                .map { it.trim() }
+        }
+
+        if (rows.isEmpty()) return ""
+
+        // Проверяем, есть ли строка-разделитель (содержит только дефисы и пробелы)
+        val separatorIndex = rows.indexOfFirst { row ->
+            row.all { cell -> cell.matches(Regex("^[-:\\s]+$")) }
+        }
+
+        val headerRows = if (separatorIndex > 0) rows.take(separatorIndex) else listOf(rows.first())
+        val dataRows = if (separatorIndex >= 0) rows.drop(separatorIndex + 1) else rows.drop(1)
+
+        return buildString {
+            append("<table class=\"markdown-table\">")
+
+            // Заголовок
+            if (headerRows.isNotEmpty()) {
+                append("<thead>")
+                headerRows.forEach { row ->
+                    append("<tr>")
+                    row.forEach { cell ->
+                        append("<th>")
+                        append(parseInlineMarkdown(cell))
+                        append("</th>")
+                    }
+                    append("</tr>")
+                }
+                append("</thead>")
+            }
+
+            // Данные
+            if (dataRows.isNotEmpty()) {
+                append("<tbody>")
+                dataRows.forEach { row ->
+                    append("<tr>")
+                    row.forEach { cell ->
+                        append("<td>")
+                        append(parseInlineMarkdown(cell))
+                        append("</td>")
+                    }
+                    append("</tr>")
+                }
+                append("</tbody>")
+            }
+
+            append("</table>")
+        }
+    }
+
+    /**
+     * Парсинг inline markdown (bold, italic, code) для ячеек таблицы
+     */
+    private fun parseInlineMarkdown(text: String): String {
+        var result = escapeHtml(text)
 
         // Inline code
-        html = html.replace(Regex("`([^`]+)`")) { match ->
+        result = result.replace(Regex("`([^`]+)`")) { match ->
             "<code>${match.groupValues[1]}</code>"
         }
 
         // Bold
-        html = html.replace(Regex("\\*\\*([^*]+)\\*\\*")) { match ->
+        result = result.replace(Regex("\\*\\*([^*]+)\\*\\*")) { match ->
             "<strong>${match.groupValues[1]}</strong>"
         }
 
         // Italic
-        html = html.replace(Regex("\\*([^*]+)\\*")) { match ->
+        result = result.replace(Regex("\\*([^*]+)\\*")) { match ->
             "<em>${match.groupValues[1]}</em>"
         }
 
-        // Headers
-        html = html.replace(Regex("^### (.+)$", RegexOption.MULTILINE)) { match ->
-            "<h3>${match.groupValues[1]}</h3>"
-        }
-        html = html.replace(Regex("^## (.+)$", RegexOption.MULTILINE)) { match ->
-            "<h2>${match.groupValues[1]}</h2>"
-        }
-        html = html.replace(Regex("^# (.+)$", RegexOption.MULTILINE)) { match ->
-            "<h1>${match.groupValues[1]}</h1>"
-        }
-
-        // Links
-        html = html.replace(Regex("\\[([^\\]]+)\\]\\(([^)]+)\\)")) { match ->
-            "<a href=\"${match.groupValues[2]}\" target=\"_blank\">${match.groupValues[1]}</a>"
-        }
-
-        // Lists
-        html = html.replace(Regex("^- (.+)$", RegexOption.MULTILINE)) { match ->
-            "<li>${match.groupValues[1]}</li>"
-        }
-        html = html.replace(Regex("(<li>.*</li>)", RegexOption.MULTILINE)) { match ->
-            "<ul>${match.value}</ul>"
-        }
-
-        // Paragraphs (не трогаем placeholders для блоков кода)
-        html = html.replace(Regex("^(?!<[hul]|<div|<pre|___CODE_BLOCK_)(.+)$", RegexOption.MULTILINE)) { match ->
-            "<p>${match.groupValues[1]}</p>"
-        }
-
-        // Шаг 3: Возвращаем блоки кода обратно в конце
-        codeBlocks.forEach { (placeholder, codeHtml) ->
-            html = html.replace(placeholder, codeHtml)
-        }
-
-        return html
+        return result
     }
 
     fun requestNotificationPermission() {

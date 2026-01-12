@@ -28,6 +28,8 @@ import com.claude.agent.llm.mcp.local.ReminderMcp
 import com.claude.agent.llm.mcp.local.SolarActivityMcp
 import com.claude.agent.llm.mcp.local.WeatherMcp
 import com.claude.agent.llm.mcp.local.AndroidStudioLocalMcp
+import com.claude.agent.llm.mcp.local.GitRepositoryMcp
+import com.claude.agent.llm.mcp.local.HelpMcp
 import com.claude.agent.llm.mcp.remote.AirTicketsMcp
 import com.claude.agent.service.LocalAgentManager
 import com.claude.agent.service.OllamaEmbeddingClient
@@ -78,19 +80,16 @@ import java.security.KeyStore
  */
 private fun resolveComposeWebPath(logger: org.slf4j.Logger): File? {
     val possiblePaths = listOf(
-        // Для production деплоя (deploy.sh копирует в ui/)
-        // WorkingDirectory=/home/agent/KotlinAgent, поэтому "ui" будет найден
-        File("ui"),
-        File(System.getProperty("user.dir"), "ui"),
-        // Для запуска из корня проекта (development)
+        // ПРИОРИТЕТ 1: Development - свежая сборка из compose-ui/build
         File("compose-ui/build/dist/js/productionExecutable"),
-        File("compose-ui/build/distributions"),
-        // Для запуска из app/
-        File("../compose-ui/build/dist/js/productionExecutable"),
-        File("../compose-ui/build/distributions"),
-        // Относительно user.dir
         File(System.getProperty("user.dir"), "compose-ui/build/dist/js/productionExecutable"),
-        File(System.getProperty("user.dir"), "compose-ui/build/distributions")
+        File("../compose-ui/build/dist/js/productionExecutable"),
+        File("compose-ui/build/distributions"),
+
+        // ПРИОРИТЕТ 2: Production - deploy.sh копирует в ui/
+        // Используется только если compose-ui/build не найден
+        File("ui"),
+        File(System.getProperty("user.dir"), "ui")
     )
 
     logger.debug("Поиск Compose Web сборки в следующих местах:")
@@ -190,7 +189,7 @@ private fun startComposeUIDevServer(logger: org.slf4j.Logger) {
 
     try {
         val processBuilder = ProcessBuilder()
-            .command(gradlewFile.absolutePath, ":compose-ui:jsBrowserRun", "--continuous")
+            .command(gradlewFile.absolutePath, ":compose-ui:jsBrowserDevelopmentRun", "--continuous")
             .directory(projectRoot)
             .redirectOutput(ProcessBuilder.Redirect.INHERIT)
             .redirectError(ProcessBuilder.Redirect.INHERIT)
@@ -302,31 +301,6 @@ fun Application.module() {
     }
     val geolocationService = GeolocationService(httpClient)
 
-    // === Инициализация сервисов ===
-    val repository = ConversationRepository()
-    val webSocketService = WebSocketService()
-
-    val reminderService = ReminderService(repository, webSocketService)
-
-    val remoteMcpProvider = RemoteMcpProvider(listOf(AirTicketsMcp()))
-
-    val reminderMcp = ReminderMcp(reminderService)
-
-    val localMcpProvider = LocalMcpProvider(
-        listOf(
-            ActionPlannerMcp(),
-            WeatherMcp(httpClient, geolocationService),
-            SolarActivityMcp(httpClient, geolocationService),
-            ChatSummaryMcp(),
-            reminderMcp,
-            AndroidStudioLocalMcp(),
-        )
-    )
-
-    // === Инициализация сервисов оптимизации ===
-    val tokenMetricsService = TokenMetricsService()
-    val toolsFilterService = ToolsFilterService()
-
     // === Инициализация RAG сервисов (опционально) ===
     val ragService = try {
         // Путь относительно рабочей директории (корень проекта при запуске через Gradle)
@@ -343,7 +317,39 @@ fun Application.module() {
         null
     }
 
+    // === Инициализация сервисов ===
+    val repository = ConversationRepository()
+    val webSocketService = WebSocketService()
+
+    val reminderService = ReminderService(repository, webSocketService)
+
+    val remoteMcpProvider = RemoteMcpProvider(listOf(AirTicketsMcp()))
+
+    val reminderMcp = ReminderMcp(reminderService)
+    val helpMcp = HelpMcp(ragService, ollamaEmbeddingClient)
+
+    val localMcpProvider = LocalMcpProvider(
+        listOf(
+            ActionPlannerMcp(),
+            WeatherMcp(httpClient, geolocationService),
+            SolarActivityMcp(httpClient, geolocationService),
+            ChatSummaryMcp(),
+            reminderMcp,
+            AndroidStudioLocalMcp(),
+            GitRepositoryMcp(),
+            helpMcp
+            )
+    )
+
+    // === Инициализация сервисов оптимизации ===
+    val tokenMetricsService = TokenMetricsService()
+    val toolsFilterService = ToolsFilterService()
+
     val mcpTools = MCPTools(localMcpProvider = localMcpProvider, remoteMcpProvider = remoteMcpProvider)
+
+    // Устанавливаем зависимости для HelpMcp после создания providers
+    helpMcp.localMcpProvider = localMcpProvider
+    helpMcp.remoteTools = remoteMcpProvider.getAllServers()
     val claudeClient = ClaudeClient(
         httpClient = httpClient,
         mcpTools = mcpTools,
@@ -446,10 +452,15 @@ fun Application.module() {
         }
 
         // Health check и tools
-        healthRoutes(claudeClient, mcpTools)
+        healthRoutes(claudeClient = claudeClient, mcpTools = mcpTools)
 
         // Chat endpoints
-        chatRoutes(claudeClient, historyCompressor, repository)
+        chatRoutes(
+            claudeClient = claudeClient,
+            mcpTools = mcpTools,
+            historyCompressor = historyCompressor,
+            repository = repository
+        )
 
         // Session management
         sessionRoutes(repository)
@@ -458,7 +469,7 @@ fun Application.module() {
         reminderRoutes(reminderService)
 
         // RAG endpoints
-        ragRoutes(ragService, ollamaEmbeddingClient)
+        ragRoutes(ragService = ragService, ollamaEmbeddingClient = ollamaEmbeddingClient)
 
         // Token metrics
         metricsRoutes(tokenMetricsService)
@@ -471,11 +482,23 @@ fun Application.module() {
         // Попробуем найти Compose Web сборку
         val composeWebPath = resolveComposeWebPath(logger)
 
+        // Отключаем кеширование для статических файлов в режиме разработки
+        intercept(ApplicationCallPipeline.Plugins) {
+            if (call.request.local.uri.endsWith(".js") ||
+                call.request.local.uri.endsWith(".css") ||
+                call.request.local.uri.endsWith(".html")) {
+                call.response.headers.append(HttpHeaders.CacheControl, "no-cache, no-store, must-revalidate")
+                call.response.headers.append(HttpHeaders.Pragma, "no-cache")
+                call.response.headers.append(HttpHeaders.Expires, "0")
+            }
+        }
+
         if (composeWebPath != null && composeWebPath.exists() && composeWebPath.isDirectory) {
             // Обслуживаем Compose Web приложение
             staticFiles("/", composeWebPath)
 
             logger.info("✅ Compose Web приложение доступно из: ${composeWebPath.absolutePath}")
+            logger.info("⚠️ Кеширование отключено для режима разработки")
         } else {
             // Fallback к старым статическим файлам
             val staticFolder = AppConfig.staticFolder

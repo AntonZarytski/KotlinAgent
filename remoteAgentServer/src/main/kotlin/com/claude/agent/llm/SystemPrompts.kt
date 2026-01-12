@@ -5,6 +5,8 @@ import com.claude.agent.llm.mcp.ACTION_PLANNER
 import com.claude.agent.llm.mcp.AIR_TICKETS
 import com.claude.agent.llm.mcp.ANDROID_STUDIO_MCP
 import com.claude.agent.llm.mcp.CHAT_SUMMARY
+import com.claude.agent.llm.mcp.GIT_REPOSITORY
+import com.claude.agent.llm.mcp.PROJECT_HELP
 import com.claude.agent.llm.mcp.REMINDER
 import com.claude.agent.llm.mcp.SOLAR
 import com.claude.agent.llm.mcp.WEATHER
@@ -143,6 +145,40 @@ object SystemPrompts {
                     CHAT_SUMMARY -> toolsPrompt += "\n- $CHAT_SUMMARY - получить краткое summary текущего чата"
                     AIR_TICKETS -> toolsPrompt += "\n- $AIR_TICKETS remote MCP - Позволяет быстро подобрать лучшие варианты перелётов с учётом маршрута, дат (включая гибкость ±3 дня), типа поездки, количества пассажиров и класса обслуживания."
                     ANDROID_STUDIO_MCP -> toolsPrompt += "\n- $ANDROID_STUDIO_MCP remote MCP - Позволяет управлять эмулятором Android Studio и выполняйте команды ADB на удаленной машине разработчика."
+                    GIT_REPOSITORY -> toolsPrompt += """- $GIT_REPOSITORY - работа с git-репозиторием:
+                      * get_current_branch - текущая ветка
+                      * get_status - измененные файлы в текущей ветке
+                      * get_recent_commits - последние коммиты
+                      * get_diff - изменения в коде
+                      * get_branches - список всех веток
+                      * get_file_history - история изменений файла
+                      * list_files_in_branch - список файлов в любой ветке (с фильтром по расширению)
+                      * show_file_from_branch - показать содержимое файла из любой ветки
+                      * compare_branches - сравнить две ветки (список измененных файлов)
+                      * get_branch_commits - коммиты в ветке (которых нет в main)
+
+                      ВАЖНО: Можно работать с любой веткой БЕЗ переключения (checkout)!
+                      Примеры:
+                      - Список .kt файлов в ветке day_12: list_files_in_branch(branch="origin/day_12", file_extension=".kt")
+                      - Содержимое файла из ветки: show_file_from_branch(branch="origin/day_12", file_path="path/to/file.kt")
+                      - Сравнить ветки: compare_branches(branch="origin/day_12", target_branch="main")
+                      """
+                    PROJECT_HELP -> toolsPrompt += """$PROJECT_HELP - 
+                             Пользователь может использовать команду /help для быстрого поиска информации в документации проекта.
+                             Формат: /help [вопрос](опционально)
+                             
+                             Примеры:
+                             - /help
+                             - /help Как работает RAG?
+                             - /help Как создать MCP tool?
+                             - /help Правила стиля кода
+                             
+                             Эта команда автоматически использует RAG для поиска релевантной информации.
+                             
+                             ИНСТРУМЕНТ project_help:
+                             При использовании инструмента project_help всегда давай конкретные ответы, только касающиеся вопроса, на основе найденного контекста.
+                             Если пользователь вводит только /help без вопроса, то выводи подробную информацию по проекту.
+                            """
                 }
             }
             toolsPrompt += """

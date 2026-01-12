@@ -5,12 +5,17 @@ import com.claude.agent.database.ConversationRepository
 import com.claude.agent.models.*
 import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.llm.SystemPrompts
+import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.service.HistoryCompressor
 import io.ktor.http.*
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.slf4j.LoggerFactory
 
 /**
@@ -20,6 +25,7 @@ import org.slf4j.LoggerFactory
  */
 fun Route.chatRoutes(
     claudeClient: ClaudeClient,
+    mcpTools: MCPTools,
     historyCompressor: HistoryCompressor,
     repository: ConversationRepository
 ) {
@@ -74,20 +80,76 @@ fun Route.chatRoutes(
                 logger.info("Получена геолокация от браузера: lat=${request.user_location.latitude}, lon=${request.user_location.longitude}")
             }
 
-            // Отправляем запрос к Claude API
+            // Обработка команды /help - теперь через LLM для генерации красивого ответа
+            val isHelpCommand = request.message.trim().startsWith("/help")
+            val actualMessage = if (isHelpCommand) {
+                val helpQuery = request.message.trim().removePrefix("/help").trim()
+
+                // Вызываем project_help tool для получения контекста
+                val helpResult = mcpTools.callLocalTool(
+                    toolName = "project_help",
+                    arguments = JsonObject(
+                        mapOf(
+                            "query" to JsonPrimitive(helpQuery)
+                        )
+                    ),
+                    clientIp = clientIp,
+                    userLocation = request.user_location,
+                    sessionId = request.session_id
+                )
+
+                val helpJson = kotlinx.serialization.json.Json.parseToJsonElement(helpResult).jsonObject
+                val mode = helpJson["mode"]?.jsonPrimitive?.content ?: "search"
+                val context = helpJson["context"]?.jsonPrimitive?.content ?: ""
+                val toolsInfo = helpJson["tools_info"]?.jsonPrimitive?.content ?: ""
+
+                // Формируем запрос для LLM на основе режима
+                if (mode == "overview" || mode == "overview_static") {
+                    // Общая справка - просим LLM создать структурированный обзор
+                    """На основе следующей информации создай подробную справку по проекту KotlinAgent.
+
+Информация из документации:
+$context
+
+Доступные MCP Tools:
+$toolsInfo
+
+Создай красивый, структурированный обзор проекта с разделами:
+1. Краткое описание проекта
+2. Архитектура и основные компоненты
+3. Доступные MCP Tools (используй информацию выше)
+4. API Endpoints
+5. Примеры использования
+6. Полезные советы
+
+Используй эмодзи для улучшения читаемости. Будь кратким, но информативным."""
+                } else {
+                    // Поиск по конкретной теме
+                    """Вопрос пользователя: $helpQuery
+
+Найденная информация в документации:
+$context
+
+На основе этой информации дай подробный и структурированный ответ на вопрос пользователя.
+Используй markdown для форматирования. Будь конкретным и полезным."""
+                }
+            } else {
+                request.message
+            }
+
             val claudeResponse = claudeClient.sendMessage(
-                userMessage = request.message,
+                userMessage = actualMessage,
                 outputFormat = request.output_format,
                 maxTokens = maxTokens,
                 specMode = request.spec_mode,
                 conversationHistory = conversationHistory,
                 temperature = temperature,
-                enabledTools = request.enabled_tools,
+                enabledTools = if (isHelpCommand) emptyList() else request.enabled_tools, // Отключаем tools для /help
                 clientIp = clientIp,
                 userLocation = request.user_location,
                 sessionId = request.session_id,
                 showIntermediateMessages = request.show_intermediate_messages,
-                useRag = request.use_rag,
+                useRag = false, // Отключаем RAG для /help, т.к. контекст уже получен
                 ragTopK = request.rag_top_k,
                 ragMinSimilarity = request.rag_min_similarity,
                 ragFilterEnabled = request.rag_filter_enabled

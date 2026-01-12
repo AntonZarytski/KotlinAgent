@@ -27,6 +27,8 @@ sealed interface Mcp {
 
 const val AIR_TICKETS = "kiwi-com-flight-search"
 const val ANDROID_STUDIO_MCP = "android_studio_mcp"
+const val GIT_REPOSITORY = "git_repository"
+const val PROJECT_HELP = "project_help"
 const val WEATHER = "get_weather_forecast"
 const val SOLAR = "get_solar_activity"
 const val CHAT_SUMMARY = "chat_summary"
