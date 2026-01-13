@@ -11,6 +11,7 @@ repositories {
 }
 
 dependencies {
+    // Kotlinx ecosystem включает serialization, coroutines, datetime
     implementation(libs.bundles.kotlinxEcosystem)
 
     // Exposed ORM for shared database models

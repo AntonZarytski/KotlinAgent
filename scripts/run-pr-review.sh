@@ -30,12 +30,12 @@ echo "  PR Number: $PR_NUMBER"
 echo "  Repository: $REPO_OWNER/$REPO_NAME"
 
 # Компилируем Kotlin CLI инструмент для ревью
-echo "🔨 Building PR review tool..."
-./gradlew :remoteAgentServer:shadowJar
+echo "🔨 Building PR review CLI..."
+./gradlew :pr-review-cli:jar
 
 # Запускаем ревью
 echo "🔍 Running AI code review..."
-java -jar remoteAgentServer/build/libs/remoteAgentServer-all.jar \
+java -jar pr-review-cli/build/libs/pr-review-cli.jar \
   review-pr \
   --branch "$PR_BRANCH" \
   --base-branch "$BASE_BRANCH" \

@@ -1,5 +1,6 @@
 package com.claude.agent.service
 
+import com.claude.agent.common.models.*
 import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.llm.mcp.MCPTools
 import kotlinx.serialization.json.*
@@ -15,42 +16,10 @@ class PRReviewService(
     private val claudeClient: ClaudeClient,
     private val mcpTools: MCPTools,
     private val ragService: RagService? = null,
-    private val ollamaEmbeddingClient: OllamaEmbeddingClient? = null
+    private val ollamaEmbeddingClient: OllamaEmbeddingClient? = null,
+    private val githubService: GitHubService? = null
 ) {
     private val logger = LoggerFactory.getLogger(PRReviewService::class.java)
-
-    data class PRInfo(
-        val branch: String,
-        val targetBranch: String = "main",
-        val title: String? = null,
-        val description: String? = null
-    )
-
-    data class PRReview(
-        val summary: String,
-        val overallAssessment: String,
-        val comments: List<ReviewComment>,
-        val suggestions: List<String>,
-        val complianceChecks: List<ComplianceCheck>
-    )
-
-    data class ReviewComment(
-        val file: String,
-        val line: Int? = null,
-        val severity: Severity,
-        val message: String,
-        val suggestion: String? = null
-    )
-
-    enum class Severity {
-        CRITICAL, WARNING, INFO, SUGGESTION
-    }
-
-    data class ComplianceCheck(
-        val category: String,
-        val status: String,
-        val details: String
-    )
 
     /**
      * Выполняет полный анализ PR и генерирует ревью
@@ -583,4 +552,32 @@ class PRReviewService(
         val status: String,
         val diff: String
     )
+
+    /**
+     * Публикует ревью как комментарий в GitHub PR
+     *
+     * @param owner Владелец репозитория
+     * @param repo Название репозитория
+     * @param prNumber Номер Pull Request
+     * @param markdown Текст ревью в формате Markdown
+     * @return URL созданного комментария или null в случае ошибки
+     */
+    suspend fun postReviewToGitHub(
+        owner: String,
+        repo: String,
+        prNumber: Int,
+        markdown: String
+    ): String? {
+        if (githubService == null) {
+            logger.warn("GitHub service is not configured")
+            return null
+        }
+
+        return githubService.postPRComment(
+            owner = owner,
+            repo = repo,
+            prNumber = prNumber,
+            markdown = markdown
+        )
+    }
 }

@@ -2,7 +2,7 @@ name: AI PR Review (Webhook)
 
 # Альтернативный вариант - использование GitHub webhook
 # Настройте webhook в Settings -> Webhooks:
-#   Payload URL: https://your-server.com/api/pr-review/webhook
+#   Payload URL: https://veola-multistratified-karie.ngrok-free.dev/api/pr-review/webhook
 #   Content type: application/json
 #   Events: Pull requests
 
@@ -22,4 +22,4 @@ jobs:
           echo "ℹ️ This workflow is for documentation only"
           echo "PR Review is triggered via GitHub webhook to your server"
           echo "Configure webhook at: https://github.com/${{ github.repository }}/settings/hooks"
-          echo "Webhook URL: https://your-server.com/api/pr-review/webhook"
+          echo "Webhook URL: https://veola-multistratified-karie.ngrok-free.dev/api/pr-review/webhook"

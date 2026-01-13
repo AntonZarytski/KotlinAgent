@@ -1,5 +1,6 @@
 package com.claude.agent.cli
 
+import com.claude.agent.common.models.PRInfo
 import com.claude.agent.config.AppConfig
 import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.llm.mcp.MCPTools
@@ -22,7 +23,7 @@ import kotlin.system.exitProcess
  * CLI для запуска PR ревью из командной строки или CI/CD
  * 
  * Использование:
- * java -jar app.jar review-pr --branch feature/new-feature --base-branch main --output review.md
+ * java -jar pr-review-cli.jar review-pr --branch feature/new-feature --base-branch main --output review.md
  */
 object PRReviewCLI {
     private val logger = LoggerFactory.getLogger(PRReviewCLI::class.java)
@@ -59,9 +60,9 @@ object PRReviewCLI {
             
             // Выводим в консоль
             println()
-            println("=" .repeat(80))
+            println("=".repeat(80))
             println(review)
-            println("=" .repeat(80))
+            println("=".repeat(80))
 
             exitProcess(0)
 
@@ -256,7 +257,7 @@ object PRReviewCLI {
         logger.info("🔍 Analyzing PR...")
 
         // Выполняем ревью
-        val prInfo = PRReviewService.PRInfo(
+        val prInfo = PRInfo(
             branch = options.branch,
             targetBranch = options.baseBranch,
             title = options.prTitle,
@@ -281,13 +282,13 @@ object PRReviewCLI {
     private fun printUsage() {
         println("""
             AI PR Review CLI
-            
+
             Usage:
-              java -jar app.jar review-pr [OPTIONS]
-            
+              java -jar pr-review-cli.jar review-pr [OPTIONS]
+
             Required Options:
               --branch BRANCH              Source branch to review
-            
+
             Optional Options:
               --base-branch BRANCH         Target branch (default: main)
               --output PATH                Output file path (default: pr-review-report.md)
@@ -297,22 +298,22 @@ object PRReviewCLI {
               --enable-rag                 Enable RAG context retrieval
               --rag-db-path PATH           RAG database path (default: rag_index.db)
               --help, -h                   Show this help message
-            
+
             Environment Variables:
               ANTHROPIC_API_KEY            Required - Your Anthropic API key
-            
+
             Examples:
               # Basic usage
-              java -jar app.jar review-pr --branch feature/new-api
-              
+              java -jar pr-review-cli.jar review-pr --branch feature/new-api
+
               # With custom base branch and output
-              java -jar app.jar review-pr --branch feature/auth --base-branch develop -o review.md
-              
+              java -jar pr-review-cli.jar review-pr --branch feature/auth --base-branch develop -o review.md
+
               # With RAG enabled
-              java -jar app.jar review-pr --branch feature/refactor --enable-rag
-              
+              java -jar pr-review-cli.jar review-pr --branch feature/refactor --enable-rag
+
               # Full example with all options
-              java -jar app.jar review-pr \
+              java -jar pr-review-cli.jar review-pr \
                 --branch feature/payment-integration \
                 --base-branch main \
                 --pr-title "Add payment gateway" \
@@ -333,3 +334,4 @@ object PRReviewCLI {
         var ragDbPath: String = "rag_index.db"
     )
 }
+

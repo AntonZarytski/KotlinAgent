@@ -1,6 +1,5 @@
 package com.claude.agent
 
-import com.claude.agent.cli.PRReviewCLI
 import com.claude.agent.config.AppConfig
 import com.claude.agent.config.PromptCachingConfig
 import com.claude.agent.config.ToolsFilteringConfig
@@ -33,6 +32,7 @@ import com.claude.agent.llm.mcp.local.GitRepositoryMcp
 import com.claude.agent.llm.mcp.local.HelpMcp
 import com.claude.agent.llm.mcp.remote.AirTicketsMcp
 import com.claude.agent.routes.prReviewRoutes
+import com.claude.agent.service.GitHubService
 import com.claude.agent.service.LocalAgentManager
 import com.claude.agent.service.OllamaEmbeddingClient
 import com.claude.agent.service.RagService
@@ -67,14 +67,6 @@ import java.security.KeyStore
 
 fun main() {
     val logger = LoggerFactory.getLogger("Application")
-
-    // Проверка на CLI команды через system property
-    val cliCommand = System.getProperty("cliCommand")
-    if (cliCommand == "review-pr") {
-        val cliArgs = System.getProperty("cliArgs", "").split(" ").filter { it.isNotBlank() }.toTypedArray()
-        PRReviewCLI.main(arrayOf("review-pr") + cliArgs)
-        return
-    }
 
     // Запускаем Compose UI webpack dev server в фоне (если нужно)
     val autoStartComposeUI = System.getProperty("autoStartComposeUI", "true").toBoolean()
@@ -331,6 +323,15 @@ fun Application.module() {
     val repository = ConversationRepository()
     val webSocketService = WebSocketService()
 
+    // GitHub Integration
+    val githubToken = System.getenv("GITHUB_TOKEN")
+    val githubService = GitHubService(httpClient, githubToken)
+    if (githubToken != null) {
+        logger.info("GitHub integration enabled (token configured)")
+    } else {
+        logger.warn("GitHub integration disabled (GITHUB_TOKEN not set)")
+    }
+
     val reminderService = ReminderService(repository, webSocketService)
 
     val remoteMcpProvider = RemoteMcpProvider(listOf(AirTicketsMcp()))
@@ -492,7 +493,8 @@ fun Application.module() {
             claudeClient = claudeClient,
             mcpTools = mcpTools,
             ragService = ragService,
-            ollamaEmbeddingClient = ollamaEmbeddingClient
+            ollamaEmbeddingClient = ollamaEmbeddingClient,
+            githubService = githubService
         )
         prReviewRoutes(prReviewService)
 

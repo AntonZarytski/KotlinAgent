@@ -1,7 +1,7 @@
 # KotlinAgent - Comprehensive Architecture Documentation
 
-> **Last Updated**: 2025-12-24
-> **Version**: 1.0
+> **Last Updated**: 2026-01-13
+> **Version**: 1.1
 > **Author**: Auto-generated documentation
 
 ---
@@ -16,11 +16,12 @@
 6. [Database Architecture](#6-database-architecture)
 7. [RAG System Implementation](#7-rag-system-implementation)
 8. [MCP Tools System](#8-mcp-tools-system)
-9. [Key Services](#9-key-services)
-10. [API Reference](#10-api-reference)
-11. [Data Flow Diagrams](#11-data-flow-diagrams)
-12. [Configuration & Deployment](#12-configuration--deployment)
-13. [Development Guide](#13-development-guide)
+9. [PR Review CLI - Modular Architecture](#9-pr-review-cli---modular-architecture)
+10. [Key Services](#10-key-services)
+11. [API Reference](#11-api-reference)
+12. [Data Flow Diagrams](#12-data-flow-diagrams)
+13. [Configuration & Deployment](#13-configuration--deployment)
+14. [Development Guide](#14-development-guide)
 
 ---
 
@@ -157,8 +158,16 @@ KotlinAgent/
 ├── common/                      # Shared models and tables
 │   └── src/main/kotlin/
 │       └── com/claude/agent/common/
-│           └── database/
-│               └── RagTables.kt           # DocumentChunks table
+│           ├── database/
+│           │   └── RagTables.kt           # DocumentChunks table
+│           └── models/
+│               └── PRModels.kt            # PR review data models
+│
+├── pr-review-cli/               # PR Review CLI application
+│   ├── src/main/kotlin/
+│   │   └── com/claude/agent/cli/
+│   │       └── PRReviewCLI.kt             # CLI entry point
+│   └── build.gradle.kts
 │
 ├── localAgentClient/            # WebSocket client for remote tools
 │   └── src/main/kotlin/
@@ -1473,7 +1482,249 @@ suspend fun connectToServer(serverUrl: String) {
 
 ---
 
-## 9. Key Services
+## 9. PR Review CLI - Modular Architecture
+
+### Overview
+
+PR Review CLI is a standalone command-line tool for AI-powered code review of Pull Requests. It was refactored into a separate module to improve modularity and code reuse.
+
+### Module Structure
+
+```
+pr-review-cli/
+├── build.gradle.kts              # Build configuration
+└── src/main/kotlin/
+    └── com/claude/agent/cli/
+        └── PRReviewCLI.kt        # CLI entry point
+```
+
+### Dependencies
+
+```
+pr-review-cli
+    ├── remoteAgentServer (business logic & services)
+    │   ├── common (data models)
+    │   └── utils
+    └── common (data models)
+```
+
+### Data Models (common module)
+
+**Location**: `/common/src/main/kotlin/com/claude/agent/common/models/PRModels.kt`
+
+```kotlin
+@Serializable
+data class PRInfo(
+    val branch: String,
+    val targetBranch: String = "main",
+    val prTitle: String? = null,
+    val prDescription: String? = null,
+    val repoPath: String = ".",
+    val enableRag: Boolean = false,
+    val ragDbPath: String = "rag_index.db"
+)
+
+@Serializable
+data class PRReview(
+    val summary: String,
+    val comments: List<ReviewComment>,
+    val complianceChecks: List<ComplianceCheck>,
+    val recommendations: List<String>
+)
+
+@Serializable
+data class ReviewComment(
+    val file: String,
+    val line: Int?,
+    val severity: Severity,
+    val message: String,
+    val suggestion: String?
+)
+
+@Serializable
+enum class Severity {
+    CRITICAL, WARNING, INFO, SUGGESTION
+}
+
+@Serializable
+data class ComplianceCheck(
+    val name: String,
+    val passed: Boolean,
+    val details: String
+)
+```
+
+### PRReviewService (remoteAgentServer module)
+
+**Location**: `/remoteAgentServer/src/main/kotlin/com/claude/agent/service/PRReviewService.kt`
+
+**Purpose**: Core business logic for PR review
+
+```kotlin
+class PRReviewService(
+    private val claudeClient: ClaudeClient,
+    private val ragService: RagService?,
+    private val ollamaEmbeddingClient: OllamaEmbeddingClient?
+) {
+    suspend fun reviewPR(prInfo: PRInfo): PRReview {
+        // 1. Get git diff
+        val diff = getGitDiff(prInfo.branch, prInfo.targetBranch, prInfo.repoPath)
+
+        // 2. Build review prompt
+        val prompt = buildReviewPrompt(diff, prInfo)
+
+        // 3. Call Claude with RAG context
+        val (response, _, _) = claudeClient.sendMessage(
+            userMessage = prompt,
+            useRag = prInfo.enableRag,
+            ragTopK = 5,
+            ragMinSimilarity = 0.3
+        )
+
+        // 4. Parse response
+        return parseReviewResponse(response ?: "")
+    }
+
+    private fun getGitDiff(branch: String, baseBranch: String, repoPath: String): String {
+        val process = ProcessBuilder(
+            "git", "diff", "$baseBranch...$branch"
+        ).directory(File(repoPath))
+         .redirectErrorStream(true)
+         .start()
+
+        return process.inputStream.bufferedReader().readText()
+    }
+}
+```
+
+### CLI Application
+
+**Location**: `/pr-review-cli/src/main/kotlin/com/claude/agent/cli/PRReviewCLI.kt`
+
+**Purpose**: Command-line interface and argument parsing
+
+```kotlin
+object PRReviewCLI {
+    @JvmStatic
+    fun main(args: Array<String>) {
+        if (args.isEmpty() || args[0] == "--help" || args[0] == "-h") {
+            printHelp()
+            return
+        }
+
+        when (args[0]) {
+            "review-pr" -> runReview(args.drop(1))
+            else -> {
+                println("Unknown command: ${args[0]}")
+                printHelp()
+            }
+        }
+    }
+
+    private fun runReview(args: List<String>) = runBlocking {
+        // Parse arguments
+        val prInfo = parseArguments(args)
+
+        // Initialize services
+        val httpClient = HttpClient(OkHttp)
+        val ragService = if (prInfo.enableRag) {
+            RagService(prInfo.ragDbPath)
+        } else null
+
+        val ollamaClient = if (prInfo.enableRag) {
+            OllamaEmbeddingClient(httpClient)
+        } else null
+
+        val claudeClient = ClaudeClient(
+            httpClient = httpClient,
+            // ... other dependencies
+        )
+
+        val reviewService = PRReviewService(
+            claudeClient, ragService, ollamaClient
+        )
+
+        // Execute review
+        println("🔍 Reviewing PR: ${prInfo.branch} → ${prInfo.targetBranch}")
+        val review = reviewService.reviewPR(prInfo)
+
+        // Output results
+        val markdown = formatReviewAsMarkdown(review)
+        File(outputPath).writeText(markdown)
+        println("✅ Review saved to: $outputPath")
+    }
+}
+```
+
+### Usage
+
+**Build**:
+```bash
+./gradlew :pr-review-cli:jar
+```
+
+**Run**:
+```bash
+# Via wrapper script
+./scripts/pr-review-cli.sh review-pr --branch feature/new-api
+
+# Direct JAR execution
+java -jar pr-review-cli/build/libs/pr-review-cli.jar review-pr \
+  --branch feature/payment \
+  --base-branch main \
+  --enable-rag \
+  --output review.md
+```
+
+**GitHub Actions Integration**:
+```yaml
+- name: Build PR Review CLI
+  run: ./gradlew :pr-review-cli:jar
+
+- name: Run AI Code Review
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  run: |
+    java -jar pr-review-cli/build/libs/pr-review-cli.jar \
+      review-pr \
+      --branch ${{ github.head_ref }} \
+      --base-branch ${{ github.base_ref }} \
+      --output pr-review-report.md
+```
+
+### Benefits of Modular Architecture
+
+1. **Separation of Concerns**
+   - CLI logic separated from business logic
+   - Data models in shared `common` module
+   - Services reusable across CLI and HTTP API
+
+2. **Independent Building**
+   - CLI: `./gradlew :pr-review-cli:jar`
+   - Server: `./gradlew :remoteAgentServer:jar`
+
+3. **Code Reuse**
+   - `PRReviewService` used by both CLI and HTTP API
+   - Models shared across all modules
+   - No code duplication
+
+4. **Testability**
+   - Services can be tested independently
+   - CLI can be tested without server
+   - Mock dependencies easily
+
+5. **Flexibility**
+   - Easy to add new interfaces (GUI, API, etc.)
+   - Can deploy CLI separately from server
+   - Different deployment strategies
+
+### Documentation
+
+See [PR_REVIEW_CLI_ARCHITECTURE.md](docs/PR_REVIEW_CLI_ARCHITECTURE.md) for detailed documentation.
+
+---
+
+## 10. Key Services
 
 ### 9.1 ReminderService
 

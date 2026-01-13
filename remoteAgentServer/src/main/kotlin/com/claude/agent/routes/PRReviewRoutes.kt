@@ -1,5 +1,7 @@
 package com.claude.agent.routes
 
+import com.claude.agent.common.models.PRInfo
+import com.claude.agent.common.models.Severity
 import com.claude.agent.service.PRReviewService
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -67,7 +69,7 @@ fun Route.prReviewRoutes(reviewService: PRReviewService) {
                 }
                 
                 // Выполняем ревью
-                val prInfo = PRReviewService.PRInfo(
+                val prInfo = PRInfo(
                     branch = request.branch,
                     targetBranch = request.baseBranch,
                     title = request.prTitle,
@@ -87,8 +89,8 @@ fun Route.prReviewRoutes(reviewService: PRReviewService) {
                 val stats = ReviewStats(
                     filesAnalyzed = review.comments.map { it.file }.distinct().size,
                     commentsCount = review.comments.size,
-                    criticalCount = review.comments.count { it.severity == PRReviewService.Severity.CRITICAL },
-                    warningCount = review.comments.count { it.severity == PRReviewService.Severity.WARNING },
+                    criticalCount = review.comments.count { it.severity == Severity.CRITICAL },
+                    warningCount = review.comments.count { it.severity == Severity.WARNING },
                     suggestionsCount = review.suggestions.size
                 )
                 
@@ -156,7 +158,7 @@ fun Route.prReviewRoutes(reviewService: PRReviewService) {
                 logger.info("🔍 Starting review for PR #$prNumber: $branch -> $baseBranch")
                 
                 // Выполняем ревью асинхронно
-                val prInfo = PRReviewService.PRInfo(
+                val prInfo = PRInfo(
                     branch = branch,
                     targetBranch = baseBranch,
                     title = title,
@@ -171,14 +173,38 @@ fun Route.prReviewRoutes(reviewService: PRReviewService) {
                             sessionId = "webhook-pr-$prNumber",
                             repoPath = null
                         )
-                        
+
                         val markdown = reviewService.formatReviewAsMarkdown(review, prInfo)
-                        
-                        logger.info("✅ Review completed for PR #$prNumber")
-                        
-                        // TODO: Опубликовать комментарий в GitHub через API
-                        // Требуется GitHub token и repository info из payload
-                        
+
+                        // Отправляем комментарий в GitHub PR
+                        val repoOwner = payload["repository"]?.jsonObject
+                            ?.get("owner")?.jsonObject
+                            ?.get("login")?.jsonPrimitive?.contentOrNull
+
+                        val repoName = payload["repository"]?.jsonObject
+                            ?.get("name")?.jsonPrimitive?.contentOrNull
+
+                        if (repoOwner != null && repoName != null && prNumber != null) {
+                            val commentUrl = reviewService.postReviewToGitHub(
+                                owner = repoOwner,
+                                repo = repoName,
+                                prNumber = prNumber,
+                                markdown = markdown
+                            )
+
+                            if (commentUrl != null) {
+                                logger.info("✅ Review posted to GitHub: $commentUrl")
+                            } else {
+                                logger.warn("⚠️ Failed to post review to GitHub (check GITHUB_TOKEN)")
+                                logger.debug("Review markdown:\n$markdown")
+                            }
+                        } else {
+                            logger.warn("⚠️ Missing repository info, cannot post to GitHub")
+                            logger.debug("Review markdown:\n$markdown")
+                        }
+
+                        logger.info("✅ Review completed for PR #$prNumber (${markdown.length} chars)")
+
                     } catch (e: Exception) {
                         logger.error("❌ Review failed for PR #$prNumber: ${e.message}", e)
                     }
