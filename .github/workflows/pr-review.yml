@@ -67,17 +67,25 @@ jobs:
           fi
 
           # Отправляем запрос на ревью
+          # Формируем JSON через jq для правильного экранирования
+          REQUEST_JSON=$(jq -n \
+            --arg branch "${{ github.event.pull_request.head.ref }}" \
+            --arg baseBranch "${{ github.event.pull_request.base.ref }}" \
+            --arg prTitle "${{ github.event.pull_request.title }}" \
+            --arg prDescription "${{ github.event.pull_request.body }}" \
+            '{
+              branch: $branch,
+              baseBranch: $baseBranch,
+              prTitle: $prTitle,
+              prDescription: $prDescription,
+              enableRag: true
+            }')
+
           curl -X POST "${PR_REVIEW_SERVER}/api/pr-review" \
             --max-time 300 \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PR_REVIEW_API_KEY}" \
-            -d '{
-              "branch": "${{ github.event.pull_request.head.ref }}",
-              "baseBranch": "${{ github.event.pull_request.base.ref }}",
-              "prTitle": "${{ github.event.pull_request.title }}",
-              "prDescription": "${{ github.event.pull_request.body }}",
-              "enableRag": true
-            }' \
+            -d "$REQUEST_JSON" \
             -o pr-review-remote.json
 
           if [ $? -eq 0 ] && [ -f pr-review-remote.json ]; then
@@ -125,31 +133,52 @@ jobs:
           fi
 
           # Отправляем запрос на ревью
-          curl -X POST "${PR_REVIEW_LOCAL_SERVER}/api/pr-review" \
+          # Формируем JSON через jq для правильного экранирования
+          REQUEST_JSON=$(jq -n \
+            --arg branch "${{ github.event.pull_request.head.ref }}" \
+            --arg baseBranch "${{ github.event.pull_request.base.ref }}" \
+            --arg prTitle "${{ github.event.pull_request.title }}" \
+            --arg prDescription "${{ github.event.pull_request.body }}" \
+            '{
+              branch: $branch,
+              baseBranch: $baseBranch,
+              prTitle: $prTitle,
+              prDescription: $prDescription,
+              enableRag: true
+            }')
+
+          echo "📤 Sending request to: ${PR_REVIEW_LOCAL_SERVER}/api/pr-review"
+          echo "📋 Request payload:"
+          echo "$REQUEST_JSON" | jq .
+
+          HTTP_CODE=$(curl -w "%{http_code}" -X POST "${PR_REVIEW_LOCAL_SERVER}/api/pr-review" \
             --max-time 300 \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${PR_REVIEW_API_KEY}" \
-            -d '{
-              "branch": "${{ github.event.pull_request.head.ref }}",
-              "baseBranch": "${{ github.event.pull_request.base.ref }}",
-              "prTitle": "${{ github.event.pull_request.title }}",
-              "prDescription": "${{ github.event.pull_request.body }}",
-              "enableRag": true
-            }' \
-            -o pr-review-local.json
+            -d "$REQUEST_JSON" \
+            -o pr-review-local.json)
 
-          if [ $? -eq 0 ] && [ -f pr-review-local.json ]; then
+          echo "📨 HTTP Response code: $HTTP_CODE"
+
+          if [ $HTTP_CODE -eq 200 ] && [ -f pr-review-local.json ]; then
+            echo "📄 Response body:"
+            cat pr-review-local.json | jq .
+
             if jq -e '.success == true' pr-review-local.json > /dev/null; then
               echo "✅ Local review completed successfully"
               cp pr-review-local.json pr-review-response.json
               echo "success=true" >> $GITHUB_OUTPUT
             else
-              echo "❌ Local review failed"
+              echo "❌ Local review failed with error"
               jq '.error' pr-review-local.json
               exit 1
             fi
           else
-            echo "❌ Local server request failed"
+            echo "❌ Local server request failed with HTTP $HTTP_CODE"
+            if [ -f pr-review-local.json ]; then
+              echo "Response body:"
+              cat pr-review-local.json
+            fi
             exit 1
           fi
 
