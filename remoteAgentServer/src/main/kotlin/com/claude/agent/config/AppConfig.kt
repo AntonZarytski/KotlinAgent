@@ -95,6 +95,11 @@ object AppConfig {
         getEnv("STATIC_FOLDER") ?: "ui"
     }
 
+    // === GitHub Integration ===
+    val githubToken: String? by lazy {
+        getEnv("GITHUB_TOKEN")
+    }
+
     init {
         logger.info("=== Конфигурация приложения ===")
         logger.info("Порт: $port")

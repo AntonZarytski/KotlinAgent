@@ -324,12 +324,12 @@ fun Application.module() {
     val webSocketService = WebSocketService()
 
     // GitHub Integration
-    val githubToken = System.getenv("GITHUB_TOKEN")
+    val githubToken = AppConfig.githubToken
     val githubService = GitHubService(httpClient, githubToken)
     if (githubToken != null) {
-        logger.info("GitHub integration enabled (token configured)")
+        logger.info("✅ GitHub integration enabled (token configured)")
     } else {
-        logger.warn("GitHub integration disabled (GITHUB_TOKEN not set)")
+        logger.warn("⚠️ GitHub integration disabled (GITHUB_TOKEN not set)")
     }
 
     val reminderService = ReminderService(repository, webSocketService)

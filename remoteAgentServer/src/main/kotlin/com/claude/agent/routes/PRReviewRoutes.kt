@@ -147,10 +147,17 @@ fun Route.prReviewRoutes(reviewService: PRReviewService) {
                 val title = pullRequest["title"]?.jsonPrimitive?.contentOrNull
                 val body = pullRequest["body"]?.jsonPrimitive?.contentOrNull
                 val prNumber = pullRequest["number"]?.jsonPrimitive?.intOrNull
-                
+
+                logger.debug("Extracted PR data: branch=$branch, baseBranch=$baseBranch, prNumber=$prNumber, title=$title")
+                logger.debug("Pull request keys: ${pullRequest.keys}")
+
                 if (branch == null || baseBranch == null) {
+                    logger.error("❌ Missing branch information: branch=$branch, baseBranch=$baseBranch")
+                    logger.debug("Pull request object: $pullRequest")
                     call.respond(HttpStatusCode.BadRequest, mapOf(
-                        "error" to "Missing branch information"
+                        "error" to "Missing branch information",
+                        "branch" to branch,
+                        "baseBranch" to baseBranch
                     ))
                     return@post
                 }
