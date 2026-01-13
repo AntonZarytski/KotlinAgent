@@ -48,12 +48,14 @@ tasks.jar {
 }
 
 // Собирать Compose UI перед запуском сервера (без кеша для dev)
+// Только если задача run выполняется напрямую
 tasks.named("run") {
     dependsOn(":compose-ui:jsBrowserDistribution")
 }
 
 // ВАЖНО: Собирать UI даже при запуске из IntelliJ IDEA
-tasks.named("classes") {
+// Но не для других задач (например, jar для CLI)
+tasks.matching { it.name == "classes" && gradle.startParameter.taskNames.contains("run") }.configureEach {
     dependsOn(":compose-ui:jsBrowserDistribution")
 }
 

@@ -31,6 +31,8 @@ import com.claude.agent.llm.mcp.local.AndroidStudioLocalMcp
 import com.claude.agent.llm.mcp.local.GitRepositoryMcp
 import com.claude.agent.llm.mcp.local.HelpMcp
 import com.claude.agent.llm.mcp.remote.AirTicketsMcp
+import com.claude.agent.routes.prReviewRoutes
+import com.claude.agent.service.GitHubService
 import com.claude.agent.service.LocalAgentManager
 import com.claude.agent.service.OllamaEmbeddingClient
 import com.claude.agent.service.RagService
@@ -60,8 +62,69 @@ import java.security.KeyStore
 
 /**
  * Главный файл приложения Ktor.
- ** Настраивает сервер, роутинг, middleware и запускает приложение.
+ * Настраивает сервер, роутинг, middleware и запускает приложение.
  */
+
+fun main() {
+    val logger = LoggerFactory.getLogger("Application")
+
+    // Запускаем Compose UI webpack dev server в фоне (если нужно)
+    val autoStartComposeUI = System.getProperty("autoStartComposeUI", "true").toBoolean()
+    if (autoStartComposeUI) {
+        startComposeUIDevServer(logger)
+    }
+
+    logger.info("=== Starting Application ===")
+
+    // Инициализация базы данных
+    logger.info("Initializing database...")
+    try {
+        DatabaseFactory.init()
+        logger.info("✅ Database initialized successfully")
+    } catch (e: Exception) {
+        logger.error("❌ Failed to initialize database: ${e.message}", e)
+        throw e
+    }
+
+    // ВАЖНО: НЕ инициализируем RAG базу данных здесь!
+    // Exposed не поддерживает множественные подключения в одном процессе.
+    // RAG база данных инициализируется только в модуле :rag
+    // DatabaseFactory.initRagDatabase("rag_index.db")
+
+    // Генерация SSL сертификата если его нет
+    generateCertificateIfNeeded()
+
+    // Запуск Ktor сервера с SSL (Ktor 3)
+    embeddedServer(
+        Netty,
+        applicationEnvironment {
+            log = logger
+        },
+        configure = {
+            // HTTP коннектор
+            connector {
+                port = AppConfig.port
+                host = AppConfig.host
+            }
+
+            // HTTPS коннектор
+            val keyStoreFile = File("ktor.p12")
+            val keyStore = loadKeyStore("ktor.p12", "changeit")
+
+            sslConnector(
+                keyStore = keyStore,
+                keyAlias = "ktor",
+                keyStorePassword = { "changeit".toCharArray() },
+                privateKeyPassword = { "changeit".toCharArray() }
+            ) {
+                port = 8443
+                host = AppConfig.host
+                keyStorePath = keyStoreFile
+            }
+        },
+        module = Application::module
+    ).start(wait = true)
+}
 
 /**
  * Разрешает путь к Compose Web сборке.
@@ -214,67 +277,6 @@ private fun startComposeUIDevServer(logger: org.slf4j.Logger) {
     }
 }
 
-fun main() {
-    val logger = LoggerFactory.getLogger("Application")
-
-    // Запускаем Compose UI webpack dev server в фоне (если нужно)
-    val autoStartComposeUI = System.getProperty("autoStartComposeUI", "true").toBoolean()
-    if (autoStartComposeUI) {
-        startComposeUIDevServer(logger)
-    }
-
-    logger.info("=== Starting Application ===")
-
-    // Инициализация базы данных
-    logger.info("Initializing database...")
-    try {
-        DatabaseFactory.init()
-        logger.info("✅ Database initialized successfully")
-    } catch (e: Exception) {
-        logger.error("❌ Failed to initialize database: ${e.message}", e)
-        throw e
-    }
-
-    // ВАЖНО: НЕ инициализируем RAG базу данных здесь!
-    // Exposed не поддерживает множественные подключения в одном процессе.
-    // RAG база данных инициализируется только в модуле :rag
-    // DatabaseFactory.initRagDatabase("rag_index.db")
-
-    // Генерация SSL сертификата если его нет
-    generateCertificateIfNeeded()
-
-    // Запуск Ktor сервера с SSL (Ktor 3)
-    embeddedServer(
-        Netty,
-        applicationEnvironment {
-            log = logger
-        },
-        configure = {
-            // HTTP коннектор
-            connector {
-                port = AppConfig.port
-                host = AppConfig.host
-            }
-
-            // HTTPS коннектор
-            val keyStoreFile = File("ktor.p12")
-            val keyStore = loadKeyStore("ktor.p12", "changeit")
-
-            sslConnector(
-                keyStore = keyStore,
-                keyAlias = "ktor",
-                keyStorePassword = { "changeit".toCharArray() },
-                privateKeyPassword = { "changeit".toCharArray() }
-            ) {
-                port = 8443
-                host = AppConfig.host
-                keyStorePath = keyStoreFile
-            }
-        },
-        module = Application::module
-    ).start(wait = true)
-}
-
 fun Application.module() {
     val logger = LoggerFactory.getLogger("Application")
 
@@ -320,6 +322,15 @@ fun Application.module() {
     // === Инициализация сервисов ===
     val repository = ConversationRepository()
     val webSocketService = WebSocketService()
+
+    // GitHub Integration
+    val githubToken = AppConfig.githubToken
+    val githubService = GitHubService(httpClient, githubToken)
+    if (githubToken != null) {
+        logger.info("✅ GitHub integration enabled (token configured)")
+    } else {
+        logger.warn("⚠️ GitHub integration disabled (GITHUB_TOKEN not set)")
+    }
 
     val reminderService = ReminderService(repository, webSocketService)
 
@@ -476,6 +487,16 @@ fun Application.module() {
 
         // WebSocket for real-time updates
         webSocketRoutes(webSocketService)
+
+        // PR Review endpoints
+        val prReviewService = com.claude.agent.service.PRReviewService(
+            claudeClient = claudeClient,
+            mcpTools = mcpTools,
+            ragService = ragService,
+            ollamaEmbeddingClient = ollamaEmbeddingClient,
+            githubService = githubService
+        )
+        prReviewRoutes(prReviewService)
 
         // Статические файлы (UI) - ДОЛЖНЫ БЫТЬ В КОНЦЕ!
 

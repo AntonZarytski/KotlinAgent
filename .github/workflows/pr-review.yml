@@ -1,0 +1,297 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Полная история для git diff
+
+      - name: Determine execution mode
+        id: mode
+        run: |
+          # Определяем режим выполнения из переменных или labels PR
+          EXECUTION_MODE="${{ vars.PR_REVIEW_MODE }}"
+
+          # Проверяем labels PR
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'review:local') }}" == "true" ]]; then
+            EXECUTION_MODE="local"
+          elif [[ "${{ contains(github.event.pull_request.labels.*.name, 'review:remote') }}" == "true" ]]; then
+            EXECUTION_MODE="remote"
+          elif [[ "${{ contains(github.event.pull_request.labels.*.name, 'review:both') }}" == "true" ]]; then
+            EXECUTION_MODE="both"
+          fi
+
+          # По умолчанию - remote с fallback на local
+          if [ -z "$EXECUTION_MODE" ]; then
+            EXECUTION_MODE="remote-or-local"
+          fi
+
+          echo "mode=$EXECUTION_MODE" >> $GITHUB_OUTPUT
+          echo "🎯 Execution mode: $EXECUTION_MODE"
+
+      - name: Try Remote Server First
+        if: steps.mode.outputs.mode == 'remote' || steps.mode.outputs.mode == 'remote-or-local' || steps.mode.outputs.mode == 'both'
+        id: remote
+        continue-on-error: true
+        env:
+          PR_REVIEW_SERVER: ${{ secrets.PR_REVIEW_SERVER }}
+          PR_REVIEW_API_KEY: ${{ secrets.PR_REVIEW_API_KEY }}
+        run: |
+          # Проверяем что secret установлен
+          if [ -z "$PR_REVIEW_SERVER" ]; then
+            echo "⚠️ PR_REVIEW_SERVER secret is not set"
+            echo "Skipping remote server attempt"
+            exit 1
+          fi
+
+          echo "🌐 Attempting to use remote server: $PR_REVIEW_SERVER"
+
+          # Проверяем доступность сервера
+          if curl -sf --max-time 5 "${PR_REVIEW_SERVER}/api/pr-review/health" > /dev/null; then
+            echo "✅ Remote server is healthy"
+          else
+            echo "⚠️ Remote server health check failed"
+            exit 1
+          fi
+
+          # Отправляем запрос на ревью
+          # Формируем JSON через jq для правильного экранирования
+          REQUEST_JSON=$(jq -n \
+            --arg branch "${{ github.event.pull_request.head.ref }}" \
+            --arg baseBranch "${{ github.event.pull_request.base.ref }}" \
+            --arg prTitle "${{ github.event.pull_request.title }}" \
+            --arg prDescription "${{ github.event.pull_request.body }}" \
+            '{
+              branch: $branch,
+              baseBranch: $baseBranch,
+              prTitle: $prTitle,
+              prDescription: $prDescription,
+              enableRag: true
+            }')
+
+          curl -X POST "${PR_REVIEW_SERVER}/api/pr-review" \
+            --max-time 300 \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PR_REVIEW_API_KEY}" \
+            -d "$REQUEST_JSON" \
+            -o pr-review-remote.json
+
+          if [ $? -eq 0 ] && [ -f pr-review-remote.json ]; then
+            # Проверяем что ответ валидный
+            if jq -e '.success == true' pr-review-remote.json > /dev/null; then
+              echo "✅ Remote review completed successfully"
+              cp pr-review-remote.json pr-review-response.json
+              echo "success=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Remote review failed with error"
+              jq '.error' pr-review-remote.json
+              exit 1
+            fi
+          else
+            echo "❌ Remote server request failed"
+            exit 1
+          fi
+
+      - name: Fallback to Local Server
+        if: |
+          steps.mode.outputs.mode == 'local' ||
+          steps.mode.outputs.mode == 'both' ||
+          (steps.mode.outputs.mode == 'remote-or-local' && steps.remote.outcome == 'failure')
+        id: local
+        continue-on-error: true
+        env:
+          PR_REVIEW_LOCAL_SERVER: ${{ secrets.PR_REVIEW_LOCAL_SERVER }}
+          PR_REVIEW_API_KEY: ${{ secrets.PR_REVIEW_API_KEY }}
+        run: |
+          # Проверяем что secret установлен
+          if [ -z "$PR_REVIEW_LOCAL_SERVER" ]; then
+            echo "⚠️ PR_REVIEW_LOCAL_SERVER secret is not set"
+            echo "Skipping local server attempt"
+            exit 1
+          fi
+
+          echo "🏠 Attempting to use local server: $PR_REVIEW_LOCAL_SERVER"
+
+          # Проверяем доступность локального сервера
+          if curl -sf --max-time 5 "${PR_REVIEW_LOCAL_SERVER}/api/pr-review/health" > /dev/null; then
+            echo "✅ Local server is healthy"
+          else
+            echo "⚠️ Local server health check failed"
+            exit 1
+          fi
+
+          # Отправляем запрос на ревью
+          # Формируем JSON через jq для правильного экранирования
+          REQUEST_JSON=$(jq -n \
+            --arg branch "${{ github.event.pull_request.head.ref }}" \
+            --arg baseBranch "${{ github.event.pull_request.base.ref }}" \
+            --arg prTitle "${{ github.event.pull_request.title }}" \
+            --arg prDescription "${{ github.event.pull_request.body }}" \
+            '{
+              branch: $branch,
+              baseBranch: $baseBranch,
+              prTitle: $prTitle,
+              prDescription: $prDescription,
+              enableRag: true
+            }')
+
+          echo "📤 Sending request to: ${PR_REVIEW_LOCAL_SERVER}/api/pr-review"
+          echo "📋 Request payload:"
+          echo "$REQUEST_JSON" | jq .
+
+          HTTP_CODE=$(curl -w "%{http_code}" -X POST "${PR_REVIEW_LOCAL_SERVER}/api/pr-review" \
+            --max-time 300 \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${PR_REVIEW_API_KEY}" \
+            -d "$REQUEST_JSON" \
+            -o pr-review-local.json)
+
+          echo "📨 HTTP Response code: $HTTP_CODE"
+
+          if [ $HTTP_CODE -eq 200 ] && [ -f pr-review-local.json ]; then
+            echo "📄 Response body:"
+            cat pr-review-local.json | jq .
+
+            if jq -e '.success == true' pr-review-local.json > /dev/null; then
+              echo "✅ Local review completed successfully"
+              cp pr-review-local.json pr-review-response.json
+              echo "success=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Local review failed with error"
+              jq '.error' pr-review-local.json
+              exit 1
+            fi
+          else
+            echo "❌ Local server request failed with HTTP $HTTP_CODE"
+            if [ -f pr-review-local.json ]; then
+              echo "Response body:"
+              cat pr-review-local.json
+            fi
+            exit 1
+          fi
+
+      - name: Check Review Status
+        id: check
+        run: |
+          if [ -f pr-review-response.json ]; then
+            if jq -e '.success == true' pr-review-response.json > /dev/null; then
+              echo "✅ PR Review completed successfully"
+              echo "success=true" >> $GITHUB_OUTPUT
+
+              # Определяем источник ревью
+              if [ -f pr-review-remote.json ]; then
+                echo "source=remote" >> $GITHUB_OUTPUT
+              elif [ -f pr-review-local.json ]; then
+                echo "source=local" >> $GITHUB_OUTPUT
+              else
+                echo "source=unknown" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "❌ Review failed"
+              jq '.' pr-review-response.json
+              exit 1
+            fi
+          else
+            echo "❌ No review response found - both remote and local failed"
+            echo ""
+            echo "💡 Troubleshooting:"
+            echo "1. Check that PR_REVIEW_SERVER or PR_REVIEW_LOCAL_SERVER secret is set"
+            echo "2. Make sure the server is running and accessible"
+            echo "3. For local server: ensure ngrok tunnel is active"
+            echo "4. Check previous step logs for details"
+            echo ""
+            echo "Remote server attempt: ${{ steps.remote.outcome }}"
+            echo "Local server attempt: ${{ steps.local.outcome }}"
+            exit 1
+          fi
+
+      - name: Post Review Comment
+        if: steps.check.outputs.success == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REVIEW_MARKDOWN=$(jq -r '.markdown' pr-review-response.json)
+          SOURCE="${{ steps.check.outputs.source }}"
+
+          # Добавляем footer с информацией об источнике
+          FOOTER="---\n*Review generated by: **${SOURCE}** server*"
+          REVIEW_WITH_FOOTER="${REVIEW_MARKDOWN}\n\n${FOOTER}"
+
+          # Публикуем комментарий
+          gh pr comment ${{ github.event.pull_request.number }} --body "$REVIEW_WITH_FOOTER"
+          echo "✅ Review comment posted to PR (source: $SOURCE)"
+
+      - name: Post Setup Instructions (if review failed)
+        if: steps.check.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > setup-instructions.md << 'EOF'
+          ## ⚠️ AI PR Review Setup Required
+
+          The AI PR Review workflow failed because no review server is available.
+
+          ### 🚀 Quick Setup Options:
+
+          #### Option 1: Use Remote Server (Recommended for teams)
+          1. Deploy the server to a VPS/cloud instance
+          2. Add to GitHub Secrets:
+             - `PR_REVIEW_SERVER` = `https://your-server.com`
+             - `ANTHROPIC_API_KEY` = your Claude API key
+
+          #### Option 2: Use Local Server (Best for development)
+          1. **On your local machine:**
+             ```bash
+             # Start the server
+             ./gradlew :remoteAgentServer:run &
+
+             # Setup ngrok tunnel
+             ./scripts/setup-ngrok-only.sh
+             ```
+
+          2. **Copy the ngrok URL** from the output
+
+          3. **Add to GitHub Secrets:**
+             - `PR_REVIEW_LOCAL_SERVER` = `https://xxxxx.ngrok.io` (from step 1)
+             - `ANTHROPIC_API_KEY` = your Claude API key
+
+          4. **Set execution mode** (optional):
+             - Go to Settings → Variables → Actions
+             - Add `PR_REVIEW_MODE` = `local`
+
+          ### 🔍 Current Status:
+          - Remote server: `${{ steps.remote.outcome }}`
+          - Local server: `${{ steps.local.outcome }}`
+          - Execution mode: `${{ steps.mode.outputs.mode }}`
+
+          ### 📚 Documentation:
+          - [Full Setup Guide](docs/AI_PR_REVIEW_SETUP.md)
+          - [Local Server Setup](docs/LOCAL_PR_REVIEW_SETUP.md)
+
+          ---
+          *Re-run this workflow after setup is complete*
+          EOF
+
+          gh pr comment ${{ github.event.pull_request.number }} --body-file setup-instructions.md
+          echo "📋 Posted setup instructions to PR"
+
+      - name: Upload review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-review-reports
+          path: |
+            pr-review-*.json
+            pr-review-response.json

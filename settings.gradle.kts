@@ -31,3 +31,4 @@ rootProject.name = "KotlinAgent"
 include("common")
 include("localAgentClient")
 include("rag")
+include("pr-review-cli")

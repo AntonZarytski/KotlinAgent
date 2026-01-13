@@ -118,8 +118,23 @@ val cleanWebpackCache by tasks.registering(Delete::class) {
     delete(layout.buildDirectory.dir("dist"))
 }
 
+// Очищаем проблемные кеши Kotlin/JS перед компиляцией
+val cleanKotlinJsCache by tasks.registering(Delete::class) {
+    delete(layout.buildDirectory.dir("classes/kotlin/js"))
+    delete(layout.buildDirectory.dir("kotlin"))
+}
+
 tasks.named("jsBrowserProductionWebpack") {
     dependsOn(cleanWebpackCache)
+}
+
+tasks.named("jsBrowserDistribution") {
+    dependsOn(cleanWebpackCache, cleanKotlinJsCache)
+}
+
+// Очищаем кеш перед каждой компиляцией для стабильности
+tasks.named("compileKotlinJs") {
+    dependsOn(cleanKotlinJsCache)
 }
 
 //// Создаём алиас jsBrowserRun для удобства разработки
