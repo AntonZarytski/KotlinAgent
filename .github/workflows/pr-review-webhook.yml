@@ -1,0 +1,25 @@
+name: AI PR Review (Webhook)
+
+# Альтернативный вариант - использование GitHub webhook
+# Настройте webhook в Settings -> Webhooks:
+#   Payload URL: https://your-server.com/api/pr-review/webhook
+#   Content type: application/json
+#   Events: Pull requests
+
+# Этот workflow файл нужен только для документации
+# Фактическая работа происходит через webhook от GitHub напрямую к вашему серверу
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Info
+        run: |
+          echo "ℹ️ This workflow is for documentation only"
+          echo "PR Review is triggered via GitHub webhook to your server"
+          echo "Configure webhook at: https://github.com/${{ github.repository }}/settings/hooks"
+          echo "Webhook URL: https://your-server.com/api/pr-review/webhook"
