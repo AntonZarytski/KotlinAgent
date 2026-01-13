@@ -253,6 +253,8 @@ class PRReviewService(
 
         val reviewText = response.reply ?: throw RuntimeException("Empty response from Claude")
 
+        logger.info("📄 Claude response length: ${reviewText.length} chars")
+
         // Парсим ответ Claude и формируем структурированное ревью
         return parseReviewResponse(reviewText)
     }
@@ -375,16 +377,17 @@ class PRReviewService(
         
         for (line in lines) {
             when {
-                line.startsWith("### 1. SUMMARY") -> currentSection = "SUMMARY"
-                line.startsWith("### 2. OVERALL ASSESSMENT") -> currentSection = "ASSESSMENT"
-                line.startsWith("### 3. DETAILED COMMENTS") -> currentSection = "COMMENTS"
-                line.startsWith("### 4. SUGGESTIONS") -> currentSection = "SUGGESTIONS"
-                line.startsWith("### 5. COMPLIANCE") -> currentSection = "COMPLIANCE"
-                
+                // Поддерживаем оба формата: ## и ###
+                line.startsWith("## 1. SUMMARY") || line.startsWith("### 1. SUMMARY") -> currentSection = "SUMMARY"
+                line.startsWith("## 2. OVERALL ASSESSMENT") || line.startsWith("### 2. OVERALL ASSESSMENT") -> currentSection = "ASSESSMENT"
+                line.startsWith("## 3. DETAILED COMMENTS") || line.startsWith("### 3. DETAILED COMMENTS") -> currentSection = "COMMENTS"
+                line.startsWith("## 4. SUGGESTIONS") || line.startsWith("### 4. SUGGESTIONS") -> currentSection = "SUGGESTIONS"
+                line.startsWith("## 5. COMPLIANCE") || line.startsWith("### 5. COMPLIANCE") -> currentSection = "COMPLIANCE"
+
                 line.startsWith("###") || line.startsWith("##") -> {
                     // Новая секция - сбрасываем
                 }
-                
+
                 else -> when (currentSection) {
                     "SUMMARY" -> if (line.isNotBlank()) summaryLines.add(line)
                     "ASSESSMENT" -> if (line.isNotBlank()) assessmentLines.add(line)
