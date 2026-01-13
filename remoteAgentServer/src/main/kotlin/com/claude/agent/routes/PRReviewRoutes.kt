@@ -118,20 +118,84 @@ fun Route.prReviewRoutes(reviewService: PRReviewService) {
         post("/webhook") {
             try {
                 val payload = call.receive<JsonObject>()
-                
+
                 logger.info("📨 GitHub webhook received")
-                logger.debug("Payload: $payload")
-                
-                // Парсим GitHub webhook payload
-                val action = payload["action"]?.jsonPrimitive?.contentOrNull
-                val pullRequest = payload["pull_request"]?.jsonObject
-                
-                if (action == null || pullRequest == null) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf(
-                        "error" to "Invalid webhook payload"
+                logger.debug("Payload keys: ${payload.keys}")
+
+                // Определяем тип события
+                val isPushEvent = payload["ref"] != null && payload["commits"] != null
+                val isPullRequestEvent = payload["pull_request"] != null
+
+                if (isPushEvent) {
+                    // Обработка push event
+                    logger.info("📤 Push event detected")
+                    val ref = payload["ref"]?.jsonPrimitive?.contentOrNull
+                    val branch = ref?.removePrefix("refs/heads/")
+                    val repository = payload["repository"]?.jsonObject
+                    val repoOwner = repository?.get("owner")?.jsonObject?.get("login")?.jsonPrimitive?.contentOrNull
+                    val repoName = repository?.get("name")?.jsonPrimitive?.contentOrNull
+                    val defaultBranch = repository?.get("default_branch")?.jsonPrimitive?.contentOrNull ?: "main"
+
+                    if (branch == null || branch == defaultBranch) {
+                        logger.info("ℹ️ Ignoring push to default branch: $branch")
+                        call.respond(HttpStatusCode.OK, mapOf(
+                            "message" to "Push to default branch ignored"
+                        ))
+                        return@post
+                    }
+
+                    logger.info("🔍 Starting review for push to branch: $branch")
+
+                    // Запускаем ревью в фоне
+                    CoroutineScope(Dispatchers.Default).launch {
+                        try {
+                            val prInfo = PRInfo(
+                                branch = branch,
+                                targetBranch = defaultBranch,
+                                title = "Push to $branch",
+                                description = "Automatic review for push event"
+                            )
+
+                            val review = reviewService.reviewPR(
+                                prInfo = prInfo,
+                                sessionId = "webhook-push-$branch",
+                                repoPath = null
+                            )
+
+                            val markdown = reviewService.formatReviewAsMarkdown(review, prInfo)
+
+                            // Пытаемся найти открытый PR для этой ветки и добавить комментарий
+                            // Пока просто логируем
+                            logger.info("✅ Review completed for push to $branch (${markdown.length} chars)")
+                            logger.debug("Review markdown:\n$markdown")
+
+                        } catch (e: Exception) {
+                            logger.error("❌ Review failed for push to $branch: ${e.message}", e)
+                        }
+                    }
+
+                    call.respond(HttpStatusCode.Accepted, mapOf(
+                        "message" to "Review started for push to $branch"
                     ))
                     return@post
                 }
+
+                if (!isPullRequestEvent) {
+                    logger.error("❌ Unknown webhook event type")
+                    call.respond(HttpStatusCode.BadRequest, mapOf(
+                        "error" to "Unknown webhook event type",
+                        "isPush" to isPushEvent,
+                        "isPullRequest" to isPullRequestEvent
+                    ))
+                    return@post
+                }
+
+                // Обработка pull_request event
+                logger.info("🔀 Pull request event detected")
+                val action = payload["action"]?.jsonPrimitive?.contentOrNull
+                val pullRequest = payload["pull_request"]?.jsonObject!!
+
+                logger.debug("Action: $action")
                 
                 // Обрабатываем только opened, synchronize, reopened
                 if (action !in listOf("opened", "synchronize", "reopened")) {
