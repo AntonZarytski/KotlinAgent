@@ -49,6 +49,13 @@ jobs:
           PR_REVIEW_SERVER: ${{ secrets.PR_REVIEW_SERVER }}
           PR_REVIEW_API_KEY: ${{ secrets.PR_REVIEW_API_KEY }}
         run: |
+          # Проверяем что secret установлен
+          if [ -z "$PR_REVIEW_SERVER" ]; then
+            echo "⚠️ PR_REVIEW_SERVER secret is not set"
+            echo "Skipping remote server attempt"
+            exit 1
+          fi
+
           echo "🌐 Attempting to use remote server: $PR_REVIEW_SERVER"
 
           # Проверяем доступность сервера
@@ -169,6 +176,15 @@ jobs:
             fi
           else
             echo "❌ No review response found - both remote and local failed"
+            echo ""
+            echo "💡 Troubleshooting:"
+            echo "1. Check that PR_REVIEW_SERVER or PR_REVIEW_LOCAL_SERVER secret is set"
+            echo "2. Make sure the server is running and accessible"
+            echo "3. For local server: ensure ngrok tunnel is active"
+            echo "4. Check previous step logs for details"
+            echo ""
+            echo "Remote server attempt: ${{ steps.remote.outcome }}"
+            echo "Local server attempt: ${{ steps.local.outcome }}"
             exit 1
           fi
 
@@ -187,6 +203,60 @@ jobs:
           # Публикуем комментарий
           gh pr comment ${{ github.event.pull_request.number }} --body "$REVIEW_WITH_FOOTER"
           echo "✅ Review comment posted to PR (source: $SOURCE)"
+
+      - name: Post Setup Instructions (if review failed)
+        if: steps.check.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > setup-instructions.md << 'EOF'
+          ## ⚠️ AI PR Review Setup Required
+
+          The AI PR Review workflow failed because no review server is available.
+
+          ### 🚀 Quick Setup Options:
+
+          #### Option 1: Use Remote Server (Recommended for teams)
+          1. Deploy the server to a VPS/cloud instance
+          2. Add to GitHub Secrets:
+             - `PR_REVIEW_SERVER` = `https://your-server.com`
+             - `ANTHROPIC_API_KEY` = your Claude API key
+
+          #### Option 2: Use Local Server (Best for development)
+          1. **On your local machine:**
+             ```bash
+             # Start the server
+             ./gradlew :remoteAgentServer:run &
+
+             # Setup ngrok tunnel
+             ./scripts/setup-ngrok-only.sh
+             ```
+
+          2. **Copy the ngrok URL** from the output
+
+          3. **Add to GitHub Secrets:**
+             - `PR_REVIEW_LOCAL_SERVER` = `https://xxxxx.ngrok.io` (from step 1)
+             - `ANTHROPIC_API_KEY` = your Claude API key
+
+          4. **Set execution mode** (optional):
+             - Go to Settings → Variables → Actions
+             - Add `PR_REVIEW_MODE` = `local`
+
+          ### 🔍 Current Status:
+          - Remote server: `${{ steps.remote.outcome }}`
+          - Local server: `${{ steps.local.outcome }}`
+          - Execution mode: `${{ steps.mode.outputs.mode }}`
+
+          ### 📚 Documentation:
+          - [Full Setup Guide](docs/AI_PR_REVIEW_SETUP.md)
+          - [Local Server Setup](docs/LOCAL_PR_REVIEW_SETUP.md)
+
+          ---
+          *Re-run this workflow after setup is complete*
+          EOF
+
+          gh pr comment ${{ github.event.pull_request.number }} --body-file setup-instructions.md
+          echo "📋 Posted setup instructions to PR"
 
       - name: Upload review artifacts
         if: always()
