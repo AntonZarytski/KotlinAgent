@@ -245,9 +245,7 @@ fun Route.prReviewRoutes(reviewService: PRReviewService) {
                             repoPath = null
                         )
 
-                        val markdown = reviewService.formatReviewAsMarkdown(review, prInfo)
-
-                        // Отправляем комментарий в GitHub PR
+                        // Отправляем ревью с inline-комментариями в GitHub PR
                         val repoOwner = payload["repository"]?.jsonObject
                             ?.get("owner")?.jsonObject
                             ?.get("login")?.jsonPrimitive?.contentOrNull
@@ -256,25 +254,28 @@ fun Route.prReviewRoutes(reviewService: PRReviewService) {
                             ?.get("name")?.jsonPrimitive?.contentOrNull
 
                         if (repoOwner != null && repoName != null && prNumber != null) {
-                            val commentUrl = reviewService.postReviewToGitHub(
+                            val reviewUrl = reviewService.postReviewToGitHub(
                                 owner = repoOwner,
                                 repo = repoName,
                                 prNumber = prNumber,
-                                markdown = markdown
+                                review = review
                             )
 
-                            if (commentUrl != null) {
-                                logger.info("✅ Review posted to GitHub: $commentUrl")
+                            if (reviewUrl != null) {
+                                logger.info("✅ Review posted to GitHub: $reviewUrl")
+                                logger.info("   - ${review.comments.size} inline comments")
                             } else {
                                 logger.warn("⚠️ Failed to post review to GitHub (check GITHUB_TOKEN)")
+                                val markdown = reviewService.formatReviewAsMarkdown(review, prInfo)
                                 logger.debug("Review markdown:\n$markdown")
                             }
                         } else {
                             logger.warn("⚠️ Missing repository info, cannot post to GitHub")
+                            val markdown = reviewService.formatReviewAsMarkdown(review, prInfo)
                             logger.debug("Review markdown:\n$markdown")
                         }
 
-                        logger.info("✅ Review completed for PR #$prNumber (${markdown.length} chars)")
+                        logger.info("✅ Review completed for PR #$prNumber (${review.comments.size} comments)")
 
                     } catch (e: Exception) {
                         logger.error("❌ Review failed for PR #$prNumber: ${e.message}", e)

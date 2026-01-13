@@ -33,6 +33,27 @@ class GitHubService(
         val html_url: String,
         val created_at: String
     )
+
+    @Serializable
+    data class ReviewComment(
+        val path: String,
+        val line: Int,
+        val body: String
+    )
+
+    @Serializable
+    data class ReviewRequest(
+        val body: String,
+        val event: String = "COMMENT", // APPROVE, REQUEST_CHANGES, COMMENT
+        val comments: List<ReviewComment> = emptyList()
+    )
+
+    @Serializable
+    data class ReviewResponse(
+        val id: Long,
+        val html_url: String,
+        val state: String
+    )
     
     /**
      * Проверяет доступность GitHub API и валидность токена
@@ -117,9 +138,9 @@ class GitHubService(
             logger.error("Cannot update comment: GitHub token is not configured")
             return false
         }
-        
+
         val url = "$GITHUB_API_BASE/repos/$owner/$repo/issues/comments/$commentId"
-        
+
         return try {
             val response = httpClient.patch(url) {
                 header("Authorization", "Bearer $githubToken")
@@ -127,11 +148,69 @@ class GitHubService(
                 contentType(ContentType.Application.Json)
                 setBody(CommentRequest(body = markdown))
             }
-            
+
             response.status == HttpStatusCode.OK
         } catch (e: Exception) {
             logger.error("Failed to update comment: ${e.message}", e)
             false
+        }
+    }
+
+    /**
+     * Публикует Pull Request Review с inline-комментариями к конкретным строкам кода
+     *
+     * @param owner Владелец репозитория
+     * @param repo Название репозитория
+     * @param prNumber Номер Pull Request
+     * @param summary Общий комментарий к ревью
+     * @param comments Список inline-комментариев к строкам кода
+     * @param event Тип ревью: COMMENT, APPROVE, REQUEST_CHANGES
+     * @return URL созданного ревью или null в случае ошибки
+     */
+    suspend fun postPRReview(
+        owner: String,
+        repo: String,
+        prNumber: Int,
+        summary: String,
+        comments: List<ReviewComment>,
+        event: String = "COMMENT"
+    ): String? {
+        if (githubToken.isNullOrBlank()) {
+            logger.error("Cannot post review: GitHub token is not configured")
+            return null
+        }
+
+        val url = "$GITHUB_API_BASE/repos/$owner/$repo/pulls/$prNumber/reviews"
+
+        return try {
+            logger.info("📤 Posting PR review to GitHub: $owner/$repo#$prNumber (${comments.size} inline comments)")
+
+            val response = httpClient.post(url) {
+                header("Authorization", "Bearer $githubToken")
+                header("Accept", "application/vnd.github.v3+json")
+                contentType(ContentType.Application.Json)
+                setBody(ReviewRequest(
+                    body = summary,
+                    event = event,
+                    comments = comments
+                ))
+            }
+
+            if (response.status == HttpStatusCode.OK) {
+                val reviewResponse = json.decodeFromString<ReviewResponse>(response.bodyAsText())
+                logger.info("✅ Review posted successfully: ${reviewResponse.html_url}")
+                logger.info("   - ${comments.size} inline comments")
+                reviewResponse.html_url
+            } else {
+                logger.error("❌ Failed to post review: ${response.status}")
+                val errorBody = response.bodyAsText()
+                logger.error("Response: $errorBody")
+                null
+            }
+
+        } catch (e: Exception) {
+            logger.error("❌ Failed to post review to GitHub: ${e.message}", e)
+            null
         }
     }
 }

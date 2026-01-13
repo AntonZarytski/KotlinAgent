@@ -554,30 +554,89 @@ class PRReviewService(
     )
 
     /**
-     * Публикует ревью как комментарий в GitHub PR
+     * Публикует ревью как комментарий в GitHub PR с inline-комментариями
      *
      * @param owner Владелец репозитория
      * @param repo Название репозитория
      * @param prNumber Номер Pull Request
-     * @param markdown Текст ревью в формате Markdown
-     * @return URL созданного комментария или null в случае ошибки
+     * @param review Объект ревью с комментариями
+     * @return URL созданного ревью или null в случае ошибки
      */
     suspend fun postReviewToGitHub(
         owner: String,
         repo: String,
         prNumber: Int,
-        markdown: String
+        review: PRReview
     ): String? {
         if (githubService == null) {
             logger.warn("GitHub service is not configured")
             return null
         }
 
-        return githubService.postPRComment(
+        // Конвертируем ReviewComment в GitHubService.ReviewComment
+        val githubComments = review.comments.mapNotNull { comment ->
+            val line = comment.line
+            if (line != null) {
+                GitHubService.ReviewComment(
+                    path = comment.file,
+                    line = line,
+                    body = buildCommentBody(comment)
+                )
+            } else {
+                logger.warn("⚠️ Skipping comment without file/line: ${comment.message}")
+                null
+            }
+        }
+
+        // Формируем summary из общей оценки и саммари
+        val summary = buildString {
+            if (review.summary.isNotBlank()) {
+                appendLine("## 📋 Summary")
+                appendLine(review.summary)
+                appendLine()
+            }
+            if (review.overallAssessment.isNotBlank()) {
+                appendLine("## 🎯 Overall Assessment")
+                appendLine(review.overallAssessment)
+            }
+        }
+
+        logger.info("📤 Posting review with ${githubComments.size} inline comments")
+
+        return githubService.postPRReview(
             owner = owner,
             repo = repo,
             prNumber = prNumber,
-            markdown = markdown
+            summary = summary.ifBlank { "Code review completed" },
+            comments = githubComments,
+            event = "COMMENT"
         )
+    }
+
+    /**
+     * Форматирует тело inline-комментария
+     */
+    private fun buildCommentBody(comment: ReviewComment): String {
+        return buildString {
+            // Severity badge
+            val severityEmoji = when (comment.severity) {
+                Severity.CRITICAL -> "🔴"
+                Severity.WARNING -> "🟠"
+                Severity.INFO -> "ℹ️"
+                Severity.SUGGESTION -> "💡"
+            }
+
+            appendLine("$severityEmoji **${comment.severity.name}**")
+            appendLine()
+            appendLine(comment.message)
+
+            if (comment.suggestion != null) {
+                appendLine()
+                appendLine("**Suggestion:**")
+                appendLine("```")
+                appendLine(comment.suggestion)
+                appendLine("```")
+            }
+        }
     }
 }
