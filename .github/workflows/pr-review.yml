@@ -91,15 +91,22 @@ jobs:
 
       - name: Fallback to Local Server
         if: |
-          (steps.mode.outputs.mode == 'local' || steps.mode.outputs.mode == 'both' ||
-           (steps.mode.outputs.mode == 'remote-or-local' && steps.remote.outcome == 'failure')) &&
-          secrets.PR_REVIEW_LOCAL_SERVER != ''
+          steps.mode.outputs.mode == 'local' ||
+          steps.mode.outputs.mode == 'both' ||
+          (steps.mode.outputs.mode == 'remote-or-local' && steps.remote.outcome == 'failure')
         id: local
         continue-on-error: true
         env:
           PR_REVIEW_LOCAL_SERVER: ${{ secrets.PR_REVIEW_LOCAL_SERVER }}
           PR_REVIEW_API_KEY: ${{ secrets.PR_REVIEW_API_KEY }}
         run: |
+          # Проверяем что secret установлен
+          if [ -z "$PR_REVIEW_LOCAL_SERVER" ]; then
+            echo "⚠️ PR_REVIEW_LOCAL_SERVER secret is not set"
+            echo "Skipping local server attempt"
+            exit 1
+          fi
+
           echo "🏠 Attempting to use local server: $PR_REVIEW_LOCAL_SERVER"
 
           # Проверяем доступность локального сервера
