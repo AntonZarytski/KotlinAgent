@@ -47,23 +47,46 @@ tasks.jar {
     from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
 }
 
-// Собирать Compose UI перед запуском сервера (без кеша для dev)
-// Только если задача run выполняется напрямую
+// Задача для пересборки UI - ВСЕГДА выполняется, без кеширования
+val buildUI by tasks.registering {
+    group = "build"
+    description = "Пересобирает Compose UI (всегда, без кеша)"
+
+    // ВСЕГДА выполнять, НИКОГДА не кешировать
+    outputs.upToDateWhen { false }
+
+    dependsOn(":compose-ui:jsBrowserDistribution")
+
+    doFirst {
+        println("🔨 Пересборка Compose UI...")
+    }
+
+    doLast {
+        println("✅ Compose UI пересобран")
+    }
+}
+
+// UI должен пересобираться ВСЕГДА при любой сборке сервера
+tasks.named("processResources") {
+    dependsOn(buildUI)
+}
+
+// Для задачи run
 tasks.named("run") {
-    dependsOn(":compose-ui:jsBrowserDistribution")
+    dependsOn(buildUI)
 }
 
-// ВАЖНО: Собирать UI даже при запуске из IntelliJ IDEA
-// Но не для других задач (например, jar для CLI)
-tasks.matching { it.name == "classes" && gradle.startParameter.taskNames.contains("run") }.configureEach {
-    dependsOn(":compose-ui:jsBrowserDistribution")
+// Для installDist
+tasks.named("installDist") {
+    dependsOn(buildUI)
 }
 
-// Отключить кеширование для compose-ui задач при разработке
-gradle.taskGraph.whenReady {
-    allTasks
-        .filter { it.project.name == "compose-ui" }
-        .forEach {
-            it.outputs.upToDateWhen { false }
-        }
+// Для jar
+tasks.named("jar") {
+    dependsOn(buildUI)
+}
+
+// Для classes (IntelliJ IDEA)
+tasks.named("classes") {
+    dependsOn(buildUI)
 }

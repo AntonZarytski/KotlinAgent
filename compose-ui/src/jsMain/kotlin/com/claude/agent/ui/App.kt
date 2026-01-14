@@ -15,11 +15,12 @@ fun ClaudeChatApp() {
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
     var sessions by remember { mutableStateOf<List<ChatSession>>(emptyList()) }
     var reminders by remember { mutableStateOf<List<Reminder>>(emptyList()) }
+    var tickets by remember { mutableStateOf<List<SupportTicket>>(emptyList()) }
     var tools by remember { mutableStateOf<List<Tool>>(emptyList()) }
     var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     var currentSessionId by remember { mutableStateOf(Utils.generateSessionId()) }
-    var settings by remember { mutableStateOf(Settings()) }
+    var settings by remember { mutableStateOf(Utils.loadSettings()) }
 
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
@@ -27,8 +28,10 @@ fun ClaudeChatApp() {
     var showSettingsPanel by remember { mutableStateOf(false) }
     var showHistoryPanel by remember { mutableStateOf(false) }
     var showReminderPanel by remember { mutableStateOf(false) }
+    var showTicketPanel by remember { mutableStateOf(false) }
     var showTokenModal by remember { mutableStateOf(false) }
     var tokenCount by remember { mutableStateOf(0) }
+    var selectedTicket by remember { mutableStateOf<SupportTicket?>(null) }
 
     var messageCountSinceCompression by remember { mutableStateOf(0) }
     var userLocation by remember { mutableStateOf<UserLocation?>(null) }
@@ -95,6 +98,31 @@ fun ClaudeChatApp() {
                 scope.launch {
                     delay(100)
                     Utils.scrollToBottom()
+                }
+            },
+            onTicketCreatedCallback = { ticketData ->
+                try {
+                    console.log("🎫 Ticket created notification: $ticketData")
+                    // Показываем уведомление пользователю
+                    try {
+                        Utils.showBrowserNotification(
+                            "Создан тикет поддержки",
+                            "Ваша проблема зарегистрирована и будет обработана",
+                            "ticket_notification"
+                        )
+                    } catch (e: Exception) {
+                        console.error("Error showing notification: ${e.message}")
+                    }
+                    // Обновляем список тикетов
+                    scope.launch {
+                        try {
+                            loadTickets(tickets) { tickets = it }
+                        } catch (e: Exception) {
+                            console.error("Error loading tickets: ${e.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    console.error("Error in ticket created callback: ${e.message}")
                 }
             }
         )
@@ -266,6 +294,70 @@ fun ClaudeChatApp() {
             }
         )
 
+        // Ticket Panel
+        TicketPanel(
+            visible = showTicketPanel,
+            tickets = tickets,
+            onClose = { showTicketPanel = false },
+            onTicketClick = { ticketId ->
+                scope.launch {
+                    try {
+                        val ticket = ApiClient.getTicket(ticketId)
+                        selectedTicket = ticket
+                    } catch (e: Exception) {
+                        console.error("Error loading ticket: ${e.message}")
+                    }
+                }
+            },
+            onRefresh = {
+                scope.launch {
+                    loadTickets(tickets) { tickets = it }
+                }
+            }
+        )
+
+        // Ticket Detail Modal
+        if (selectedTicket != null) {
+            TicketDetailView(
+                ticket = selectedTicket,
+                onClose = { selectedTicket = null },
+                onUpdateStatus = { newStatus ->
+                    scope.launch {
+                        try {
+                            val updated = ApiClient.updateTicket(
+                                selectedTicket!!.id,
+                                UpdateTicketRequest(status = newStatus)
+                            )
+                            // Если тикет был закрыт и удален (сервер вернул null)
+                            if (updated == null) {
+                                selectedTicket = null // Закрываем модальное окно
+                                console.log("Ticket was closed and auto-deleted")
+                            } else {
+                                selectedTicket = updated
+                            }
+                            loadTickets(tickets) { tickets = it }
+                        } catch (e: Exception) {
+                            console.error("Error updating ticket: ${e.message}")
+                        }
+                    }
+                },
+                onGoToChat = { sessionId ->
+                    scope.launch {
+                        loadSession(
+                            sessionId = sessionId,
+                            onSuccess = { history ->
+                                messages = history
+                                currentSessionId = sessionId
+                                messageCountSinceCompression = 0
+                                showTicketPanel = false
+                                selectedTicket = null
+                            }
+                        )
+                    }
+                }
+            )
+        }
+
         // Main Chat Area
         Div({
             classes("chat-area")
@@ -289,8 +381,20 @@ fun ClaudeChatApp() {
                     if (showReminderPanel) {
                         showSettingsPanel = false
                         showHistoryPanel = false
+                        showTicketPanel = false
                         scope.launch {
                             loadReminders(reminders, notifiedReminders) { reminders = it }
+                        }
+                    }
+                },
+                onTicketsClick = {
+                    showTicketPanel = !showTicketPanel
+                    if (showTicketPanel) {
+                        showSettingsPanel = false
+                        showHistoryPanel = false
+                        showReminderPanel = false
+                        scope.launch {
+                            loadTickets(tickets) { tickets = it }
                         }
                     }
                 },
@@ -365,7 +469,10 @@ fun ClaudeChatApp() {
             settings = settings,
             tools = tools,
             onClose = { showSettingsPanel = false },
-            onSettingsChange = { settings = it },
+            onSettingsChange = { newSettings ->
+                settings = newSettings
+                Utils.saveSettings(newSettings)
+            },
             onClearHistory = {
                 messages = listOf(
                     Message(
@@ -488,72 +595,28 @@ private suspend fun sendMessage(
             }
 
             // Handle intermediate messages based on settings
-            if (response.intermediate_messages.isNotEmpty()) {
-                if (settings.showAllIntermediateMessages) {
-                    // Show all intermediate messages in chat history (marked as intermediate)
-                    response.intermediate_messages.forEach { intermediateMsg ->
-                        updatedMessages = updatedMessages + Message(
-                            role = intermediateMsg.role,
-                            content = "🔄 " + intermediateMsg.content,
-                            timestamp = Date().toISOString(),
-                            is_intermediate = true  // Помечаем как промежуточное
-                        )
-                    }
-
-                    // Add final response
+            if (settings.showAllIntermediateMessages && response.intermediate_messages.isNotEmpty()) {
+                // Режим отладки: показываем все промежуточные сообщения в истории чата
+                response.intermediate_messages.forEach { intermediateMsg ->
                     updatedMessages = updatedMessages + Message(
-                        role = "assistant",
-                        content = response.reply,
+                        role = intermediateMsg.role,
+                        content = "🔄 " + intermediateMsg.content,
                         timestamp = Date().toISOString(),
-                        usage = response.usage,
-                        is_intermediate = false
+                        is_intermediate = true  // Помечаем как промежуточное
                     )
-                    onMessagesUpdate(updatedMessages)
-                } else {
-                    // Show intermediate messages one by one, replacing each other
-                    // НЕ добавляем их в историю, только показываем временно
-                    coroutineScope {
-                        launch {
-                            response.intermediate_messages.forEachIndexed { index, intermediateMsg ->
-                                // Создаем временное сообщение (не добавляем в updatedMessages)
-                                val tempMessages = updatedMessages + Message(
-                                    role = intermediateMsg.role,
-                                    content = "🔄 " + intermediateMsg.content,
-                                    timestamp = Date().toISOString(),
-                                    is_intermediate = true
-                                )
-                                onMessagesUpdate(tempMessages)
-
-                                // Wait a bit before showing next message (except for the last one)
-                                if (index < response.intermediate_messages.size - 1) {
-                                    delay(800)
-                                }
-                            }
-
-                            // Show final response after last intermediate message
-                            // Очищаем промежуточные сообщения и показываем только финальный ответ
-                            delay(500)
-                            updatedMessages = updatedMessages + Message(
-                                role = "assistant",
-                                content = response.reply,
-                                timestamp = Date().toISOString(),
-                                usage = response.usage,
-                                is_intermediate = false
-                            )
-                            onMessagesUpdate(updatedMessages)
-                        }
-                    }
                 }
-            } else {
-                // No intermediate messages, just add the response
-                updatedMessages = updatedMessages + Message(
-                    role = "assistant",
-                    content = response.reply,
-                    timestamp = Date().toISOString(),
-                    usage = response.usage
-                )
-                onMessagesUpdate(updatedMessages)
             }
+
+            // Добавляем финальный ответ в историю (всегда)
+            // Промежуточные сообщения уже показаны через WebSocket streaming (streamingText)
+            updatedMessages = updatedMessages + Message(
+                role = "assistant",
+                content = response.reply,
+                timestamp = Date().toISOString(),
+                usage = response.usage,
+                is_intermediate = false
+            )
+            onMessagesUpdate(updatedMessages)
         }
     } catch (e: Exception) {
         console.error("Error sending message: ${e.message}")
@@ -658,6 +721,18 @@ private suspend fun loadReminders(
         }
     } catch (e: Exception) {
         console.error("Error loading reminders: ${e.message}")
+    }
+}
+
+private suspend fun loadTickets(
+    current: List<SupportTicket>,
+    onUpdate: (List<SupportTicket>) -> Unit
+) {
+    try {
+        val response = ApiClient.getTickets()
+        onUpdate(response.tickets)
+    } catch (e: Exception) {
+        console.error("Error loading tickets: ${e.message}")
     }
 }
 

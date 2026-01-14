@@ -30,3 +30,6 @@ Thumbs.db
 *.class
 *.jar
 !gradle-wrapper.jar
+
+# Generated files
+compose-ui/src/jsMain/kotlin/com/claude/agent/ui/BuildInfo.kt

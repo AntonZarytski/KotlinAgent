@@ -10,6 +10,7 @@ import org.w3c.dom.HTMLTextAreaElement
 fun ChatHeader(
     onHistoryClick: () -> Unit,
     onReminderClick: () -> Unit,
+    onTicketsClick: () -> Unit,
     onTokensClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
@@ -29,6 +30,13 @@ fun ChatHeader(
                 attr("title", "Напоминания")
             }) {
                 Text("🔔")
+            }
+            Button({
+                classes("icon-button")
+                onClick { onTicketsClick() }
+                attr("title", "Тикеты поддержки")
+            }) {
+                Text("🎫")
             }
         }
 
@@ -78,9 +86,11 @@ fun ChatMessages(
 ) {
     // Auto-scroll to bottom when messages change or streaming text updates
     LaunchedEffect(messages.size, isLoading, streamingText) {
-        document.getElementById("chat")?.let { chat ->
-            chat.scrollTop = chat.scrollHeight.toDouble()
-        }
+        kotlinx.browser.window.setTimeout({
+            document.getElementById("chat")?.let { chat ->
+                chat.scrollTop = chat.scrollHeight.toDouble()
+            }
+        }, 50) // Небольшая задержка для рендеринга
     }
 
     Div({ classes("chat"); id("chat") }) {
@@ -187,19 +197,7 @@ fun StreamingMessageItem(text: String) {
                     property("animation", "pulse 2s ease-in-out infinite")
                 }
             }) {
-                Div({
-                    style {
-                        property("font-size", "11px")
-                        property("color", "#92400e")
-                        property("font-weight", "600")
-                        property("margin-bottom", "8px")
-                        property("text-transform", "uppercase")
-                        property("letter-spacing", "0.5px")
-                    }
-                }) {
-                    Text("💭 Размышляю...")
-                }
-
+                // Убрали "💭 Размышляю..." - показываем только промежуточный текст
                 Div({
                     classes("markdown-content")
                     ref { element ->
@@ -214,13 +212,51 @@ fun StreamingMessageItem(text: String) {
 
 @Composable
 fun LoadingIndicator() {
+    // Убрали "Claude думает..." - показываем только анимацию
     Div({ classes("message-wrapper") }) {
         Div({ classes("avatar", "assistant") }) {
             Text("🤖")
         }
 
         Div({ classes("message", "assistant") }) {
-            Text("Claude думает...")
+            // Показываем анимированные точки вместо текста
+            Div({
+                style {
+                    property("display", "flex")
+                    property("gap", "4px")
+                    property("align-items", "center")
+                }
+            }) {
+                Span({
+                    style {
+                        property("width", "8px")
+                        property("height", "8px")
+                        property("background", "#6366f1")
+                        property("border-radius", "50%")
+                        property("animation", "bounce 1.4s infinite ease-in-out both")
+                        property("animation-delay", "-0.32s")
+                    }
+                })
+                Span({
+                    style {
+                        property("width", "8px")
+                        property("height", "8px")
+                        property("background", "#6366f1")
+                        property("border-radius", "50%")
+                        property("animation", "bounce 1.4s infinite ease-in-out both")
+                        property("animation-delay", "-0.16s")
+                    }
+                })
+                Span({
+                    style {
+                        property("width", "8px")
+                        property("height", "8px")
+                        property("background", "#6366f1")
+                        property("border-radius", "50%")
+                        property("animation", "bounce 1.4s infinite ease-in-out both")
+                    }
+                })
+            }
         }
     }
 }

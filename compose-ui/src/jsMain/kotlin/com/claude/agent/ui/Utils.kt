@@ -344,16 +344,20 @@ object Utils {
     fun showBrowserNotification(title: String, body: String, tag: String? = null) {
         if (js("'Notification' in window") == true && js("Notification.permission") == "granted") {
             try {
+                val notificationTag = tag ?: "reminder"
+                // Используем eval для передачи параметров
                 js("""
-                    new Notification(title, {
-                        body: body,
-                        icon: '/favicon.ico',
-                        badge: '/favicon.ico',
-                        tag: tag || 'reminder',
-                        requireInteraction: true,
-                        vibrate: [200, 100, 200]
+                    (function(title, body, tag) {
+                        new Notification(title, {
+                            body: body,
+                            icon: '/favicon.ico',
+                            badge: '/favicon.ico',
+                            tag: tag,
+                            requireInteraction: true,
+                            vibrate: [200, 100, 200]
+                        });
                     })
-                """)
+                """)(title, body, notificationTag)
                 console.log("Browser notification sent: $title")
             } catch (e: Exception) {
                 console.error("Error sending notification: ${e.message}")
@@ -393,6 +397,58 @@ object Utils {
             }
         } catch (e: Exception) {
             console.warn("Failed to scroll to bottom: ${e.message}")
+        }
+    }
+
+    /**
+     * Сохранить настройки в localStorage
+     */
+    fun saveSettings(settings: Settings) {
+        try {
+            // Сохраняем только enabledTools, остальные настройки можно добавить позже
+            val enabledToolsJson = settings.enabledTools.joinToString(",")
+            window.localStorage.setItem("chat_settings_enabled_tools", enabledToolsJson)
+            console.log("Settings saved: enabledTools = $enabledToolsJson")
+        } catch (e: Exception) {
+            console.error("Failed to save settings: ${e.message}")
+        }
+    }
+
+    /**
+     * Загрузить настройки из localStorage
+     * Возвращает Settings с восстановленными enabledTools или с инструментами по умолчанию
+     */
+    fun loadSettings(): Settings {
+        return try {
+            val enabledToolsJson = window.localStorage.getItem("chat_settings_enabled_tools")
+
+            if (enabledToolsJson != null && enabledToolsJson.isNotBlank()) {
+                // Восстанавливаем сохраненные инструменты
+                val enabledTools = enabledToolsJson.split(",").filter { it.isNotBlank() }.toSet()
+                console.log("Settings loaded: enabledTools = $enabledTools")
+                Settings(enabledTools = enabledTools)
+            } else {
+                // Первый запуск - используем инструменты по умолчанию
+                val defaultTools = setOf("plan_actions", "project_help", "support_crm")
+                console.log("First run, using default tools: $defaultTools")
+                Settings(enabledTools = defaultTools)
+            }
+        } catch (e: Exception) {
+            console.error("Failed to load settings: ${e.message}")
+            // В случае ошибки возвращаем настройки по умолчанию
+            Settings(enabledTools = setOf("plan_actions", "project_help", "support_crm"))
+        }
+    }
+
+    /**
+     * Очистить сохраненные настройки
+     */
+    fun clearSettings() {
+        try {
+            window.localStorage.removeItem("chat_settings_enabled_tools")
+            console.log("Settings cleared")
+        } catch (e: Exception) {
+            console.error("Failed to clear settings: ${e.message}")
         }
     }
 }

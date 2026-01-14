@@ -5,6 +5,12 @@ config.performance = {
     hints: false
 };
 
+// Отключаем минификацию для production, чтобы избежать проблем с Kotlin/JS
+config.optimization = {
+    ...config.optimization,
+    minimize: false
+};
+
 // Настраиваем stats для уменьшения вывода
 config.stats = {
     ...config.stats,

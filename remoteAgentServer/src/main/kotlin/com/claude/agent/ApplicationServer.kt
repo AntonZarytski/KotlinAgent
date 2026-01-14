@@ -5,14 +5,17 @@ import com.claude.agent.config.PromptCachingConfig
 import com.claude.agent.config.ToolsFilteringConfig
 import com.claude.agent.database.ConversationRepository
 import com.claude.agent.database.DatabaseFactory
+import com.claude.agent.database.TicketRepository
 import com.claude.agent.routes.chatRoutes
 import com.claude.agent.routes.healthRoutes
 import com.claude.agent.routes.metricsRoutes
 import com.claude.agent.routes.ragRoutes
 import com.claude.agent.routes.reminderRoutes
 import com.claude.agent.routes.sessionRoutes
+import com.claude.agent.routes.supportRoutes
 import com.claude.agent.routes.webSocketRoutes
 import com.claude.agent.service.ReminderService
+import com.claude.agent.service.SupportService
 import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.service.GeolocationService
 import com.claude.agent.service.HistoryCompressor
@@ -30,6 +33,7 @@ import com.claude.agent.llm.mcp.local.WeatherMcp
 import com.claude.agent.llm.mcp.local.AndroidStudioLocalMcp
 import com.claude.agent.llm.mcp.local.GitRepositoryMcp
 import com.claude.agent.llm.mcp.local.HelpMcp
+import com.claude.agent.llm.mcp.local.SupportMcp
 import com.claude.agent.llm.mcp.remote.AirTicketsMcp
 import com.claude.agent.routes.prReviewRoutes
 import com.claude.agent.service.GitHubService
@@ -338,6 +342,7 @@ fun Application.module() {
 
     val reminderMcp = ReminderMcp(reminderService)
     val helpMcp = HelpMcp(ragService, ollamaEmbeddingClient)
+    val supportMcp = SupportMcp(dataPath = "support_data")
 
     val localMcpProvider = LocalMcpProvider(
         listOf(
@@ -348,7 +353,8 @@ fun Application.module() {
             reminderMcp,
             AndroidStudioLocalMcp(),
             GitRepositoryMcp(),
-            helpMcp
+            helpMcp,
+            supportMcp
             )
     )
 
@@ -376,6 +382,20 @@ fun Application.module() {
     reminderService.mcpTools = mcpTools
     reminderMcp.claudeClient = claudeClient
     reminderService.startScheduler()
+
+    // Support Service и TicketRepository
+    val ticketRepository = TicketRepository()
+
+    // Устанавливаем зависимость для SupportMcp
+    supportMcp.ticketRepository = ticketRepository
+
+    val supportService = SupportService(
+        claudeClient = claudeClient,
+        mcpTools = mcpTools,
+        ragService = ragService,
+        ollamaEmbeddingClient = ollamaEmbeddingClient,
+        ticketRepository = ticketRepository
+    )
 
     logger.info("=== Сервисы инициализированы ===")
     logger.info("Порт: ${AppConfig.port}")
@@ -470,7 +490,10 @@ fun Application.module() {
             claudeClient = claudeClient,
             mcpTools = mcpTools,
             historyCompressor = historyCompressor,
-            repository = repository
+            repository = repository,
+            supportService = supportService,
+            webSocketService = webSocketService,
+            ticketRepository = ticketRepository
         )
 
         // Session management
@@ -497,6 +520,9 @@ fun Application.module() {
             githubService = githubService
         )
         prReviewRoutes(prReviewService)
+
+        // Support endpoints
+        supportRoutes(supportService, ticketRepository, webSocketService, repository)
 
         // Статические файлы (UI) - ДОЛЖНЫ БЫТЬ В КОНЦЕ!
 

@@ -32,7 +32,18 @@ data class ClaudeResponse(
     val reply: String?,
     val usage: TokenUsage?,
     val error: String?,
-    val intermediateMessages: List<Message> = emptyList()
+    val intermediateMessages: List<Message> = emptyList(),
+    val ticketCreatedViaMcp: Boolean = false  // Флаг, что тикет был создан через MCP
+)
+
+/**
+ * Внутренний результат обработки ответа от Claude API
+ */
+private data class HandleResponseResult(
+    val reply: String,
+    val usage: TokenUsage,
+    val intermediateMessages: List<Message>,
+    val ticketCreatedViaMcp: Boolean = false
 )
 
 /**
@@ -59,7 +70,7 @@ class ClaudeClient(
 
     companion object {
         private const val MAX_TOOL_ITERATIONS = 20  // Увеличено для сложных задач
-        private const val LOOP_DETECTION_THRESHOLD = 3  // Порог для детекции зацикливания
+        private const val LOOP_DETECTION_THRESHOLD = 7  // Порог для детекции зацикливания
 
         // Thread-local storage for accumulated tool results during a conversation turn
         private val accumulatedToolResults = ThreadLocal<MutableMap<String, String>>()
@@ -209,7 +220,7 @@ class ClaudeClient(
             }
 
             // Обрабатываем ответ (с поддержкой tool_use)
-            val (finalReply, totalUsage, intermediateMessages) = handleResponse(
+            val handleResult = handleResponse(
                 responseBody = responseBody,
                 initialMessages = messages,
                 model = model,
@@ -225,22 +236,21 @@ class ClaudeClient(
             )
 
             logger.info("Ответ получен за ${elapsed}ms")
-            logger.info("Использовано токенов: input=${totalUsage?.input_tokens}, output=${totalUsage?.output_tokens}")
+            logger.info("Использовано токенов: input=${handleResult.usage.input_tokens}, output=${handleResult.usage.output_tokens}")
 
             // Записываем метрики
-            if (totalUsage != null) {
-                tokenMetricsService?.recordTokenUsage(
-                    sessionId = sessionId,
-                    usage = totalUsage,
-                    cachedTokens = cacheReadTokens
-                )
-            }
+            tokenMetricsService?.recordTokenUsage(
+                sessionId = sessionId,
+                usage = handleResult.usage,
+                cachedTokens = cacheReadTokens
+            )
 
             return ClaudeResponse(
-                reply = finalReply,
-                usage = totalUsage,
+                reply = handleResult.reply,
+                usage = handleResult.usage,
                 error = null,
-                intermediateMessages = intermediateMessages
+                intermediateMessages = handleResult.intermediateMessages,
+                ticketCreatedViaMcp = handleResult.ticketCreatedViaMcp
             )
 
         } catch (e: Exception) {
@@ -270,13 +280,14 @@ class ClaudeClient(
         userLocation: com.claude.agent.models.UserLocation?,
         sessionId: String?,
         collectIntermediateMessages: Boolean = true
-    ): Triple<String, TokenUsage, List<Message>> {
+    ): HandleResponseResult {
         var currentResponse = responseBody
         val messages = initialMessages.toMutableList()
         var totalInputTokens = currentResponse["usage"]?.jsonObject?.get("input_tokens")?.jsonPrimitive?.int ?: 0
         var totalOutputTokens = currentResponse["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.int ?: 0
 
         val intermediateMessages = mutableListOf<Message>()
+        var ticketCreatedViaMcp = false  // Флаг создания тикета через MCP
         var iteration = 0
 
         // Детекция зацикливания: отслеживаем последние вызовы инструментов
@@ -313,10 +324,20 @@ class ClaudeClient(
                 // после выполнения всех инструментов. Возвращаем сообщение по умолчанию.
                 if (finalText.isBlank()) {
                     logger.warn("Claude returned empty text response after tool execution. Iteration: $iteration")
-                    return Triple("✅ Задача выполнена", usage, intermediateMessages)
+                    return HandleResponseResult(
+                        reply = "✅ Задача выполнена",
+                        usage = usage,
+                        intermediateMessages = intermediateMessages,
+                        ticketCreatedViaMcp = ticketCreatedViaMcp
+                    )
                 }
 
-                return Triple(finalText, usage, intermediateMessages)
+                return HandleResponseResult(
+                    reply = finalText,
+                    usage = usage,
+                    intermediateMessages = intermediateMessages,
+                    ticketCreatedViaMcp = ticketCreatedViaMcp
+                )
             }
 
             // Есть tool_use - обрабатываем
@@ -435,6 +456,103 @@ class ClaudeClient(
                                 )
                             )
                             logger.info("📡 Raw tool result отправлен через WebSocket: $toolName")
+
+                            // Специальная обработка для support_crm tool
+                            if (toolName == "support_crm" && sessionId != null) {
+                                try {
+                                    val resultJson = Json.parseToJsonElement(result).jsonObject
+                                    val action = toolInput["action"]?.jsonPrimitive?.content
+
+                                    // Обработка создания тикета
+                                    if (action == "create_ticket" && resultJson["success"]?.jsonPrimitive?.boolean == true) {
+                                        val ticket = resultJson["ticket"]?.jsonObject
+                                        if (ticket != null) {
+                                            val ticketId = ticket["id"]?.jsonPrimitive?.content ?: "unknown"
+                                            val title = ticket["title"]?.jsonPrimitive?.content ?: "Без названия"
+                                            val priority = ticket["priority"]?.jsonPrimitive?.content ?: "MEDIUM"
+
+                                            logger.info("🎫 Тикет создан через MCP: $ticketId - $title")
+                                            ticketCreatedViaMcp = true  // Устанавливаем флаг
+
+                                            // Отправляем уведомление о создании тикета
+                                            val ticketData = buildJsonObject {
+                                                put("ticket_id", ticketId)
+                                                put("title", title)
+                                                put("priority", priority)
+                                                put("created_via_mcp", true)
+                                            }
+
+                                            webSocketService.broadcastToSession(
+                                                sessionId = sessionId,
+                                                message = WebSocketMessage(
+                                                    type = "ticket_created",
+                                                    sessionId = sessionId,
+                                                    data = Json.encodeToString(ticketData)
+                                                )
+                                            )
+
+                                            webSocketService.broadcastGlobal(
+                                                message = WebSocketMessage(
+                                                    type = "ticket_created",
+                                                    sessionId = sessionId,
+                                                    data = Json.encodeToString(ticketData)
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    // Обработка обновления тикета
+                                    if ((action == "update_ticket" || action == "update_ticket_status") &&
+                                        resultJson["success"]?.jsonPrimitive?.boolean == true) {
+                                        val ticketId = toolInput["ticket_id"]?.jsonPrimitive?.content ?: "unknown"
+                                        val oldStatus = resultJson["old_status"]?.jsonPrimitive?.content
+                                        val newStatus = resultJson["new_status"]?.jsonPrimitive?.content
+                                        val wasDeleted = resultJson["deleted"]?.jsonPrimitive?.boolean ?: false
+
+                                        logger.info("🎫 Тикет обновлен через MCP: $ticketId ($oldStatus -> $newStatus)")
+
+                                        val ticketData = buildJsonObject {
+                                            put("ticket_id", ticketId)
+                                            if (oldStatus != null) put("old_status", oldStatus)
+                                            if (newStatus != null) put("new_status", newStatus)
+                                            put("was_deleted", wasDeleted)
+                                            put("updated_via_mcp", true)
+                                        }
+
+                                        webSocketService.broadcastToSession(
+                                            sessionId = sessionId,
+                                            message = WebSocketMessage(
+                                                type = "ticket_status_changed",
+                                                sessionId = sessionId,
+                                                data = Json.encodeToString(ticketData)
+                                            )
+                                        )
+                                    }
+
+                                    // Обработка удаления тикета
+                                    if (action == "delete_ticket" && resultJson["success"]?.jsonPrimitive?.boolean == true) {
+                                        val ticketId = resultJson["ticket_id"]?.jsonPrimitive?.content ?: "unknown"
+
+                                        logger.info("🎫 Тикет удален через MCP: $ticketId")
+
+                                        val ticketData = buildJsonObject {
+                                            put("ticket_id", ticketId)
+                                            put("deleted_via_mcp", true)
+                                        }
+
+                                        webSocketService.broadcastToSession(
+                                            sessionId = sessionId,
+                                            message = WebSocketMessage(
+                                                type = "ticket_deleted",
+                                                sessionId = sessionId,
+                                                data = Json.encodeToString(ticketData)
+                                            )
+                                        )
+                                    }
+                                } catch (e: Exception) {
+                                    logger.warn("Ошибка обработки support_crm результата: ${e.message}")
+                                }
+                            }
                         } catch (e: Exception) {
                             logger.warn("Не удалось отправить tool result через WebSocket: ${e.message}")
                         }
@@ -523,17 +641,23 @@ class ClaudeClient(
         // Если после лимита итераций текст пустой, возвращаем сообщение по умолчанию
         if (finalText.isBlank()) {
             logger.warn("Claude не вернул текстовый ответ после достижения лимита итераций")
-            return Triple(
-                "⚠️ Достигнут лимит итераций ($MAX_TOOL_ITERATIONS). " +
+            return HandleResponseResult(
+                reply = "⚠️ Достигнут лимит итераций ($MAX_TOOL_ITERATIONS). " +
                 "Выполнено инструментов: ${recentToolCalls.size}. " +
                 "Возможно, задача не завершена полностью. " +
                 "Попробуйте переформулировать запрос или разбить на более мелкие задачи.",
-                usage,
-                intermediateMessages
+                usage = usage,
+                intermediateMessages = intermediateMessages,
+                ticketCreatedViaMcp = ticketCreatedViaMcp
             )
         }
 
-        return Triple(finalText, usage, intermediateMessages)
+        return HandleResponseResult(
+            reply = finalText,
+            usage = usage,
+            intermediateMessages = intermediateMessages,
+            ticketCreatedViaMcp = ticketCreatedViaMcp
+        )
     }
 
     private fun buildMessages(history: List<Message>, userMessage: String, ragContext: String?): List<JsonObject> {

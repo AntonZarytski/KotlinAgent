@@ -49,7 +49,7 @@ data class Settings(
     val specMode: Boolean = false,
     val sendHistory: Boolean = true,
     val showTokenCount: Boolean = true,
-    val showAllIntermediateMessages: Boolean = true,
+    val showAllIntermediateMessages: Boolean = false,  // Изменено на false - промежуточные сообщения не сохраняются в истории
     val enabledTools: Set<String> = emptySet(),
     val useRag: Boolean = false,                // Использовать RAG для контекста
     val ragTopK: Int = 3,                       // Количество релевантных чанков
@@ -129,4 +129,58 @@ data class RemindersResponse(
 @Serializable
 data class UnreadCountsResponse(
     val unread_counts: Map<String, Int> = emptyMap()
+)
+
+// Ticket models
+@Serializable
+data class TicketUpdateEntry(
+    val timestamp: String,
+    val updateType: String,
+    val description: String
+)
+
+@Serializable
+data class SupportTicket(
+    val id: String,
+    val sessionId: String,  // ID сессии чата (обязательное поле)
+    val title: String,
+    val description: String,
+    val status: String,  // OPEN, IN_PROGRESS, WAITING_FOR_USER, RESOLVED, CLOSED
+    val priority: String,  // LOW, MEDIUM, HIGH, CRITICAL
+    val category: String? = null,
+    val createdAt: String,
+    val updatedAt: String,
+    val resolvedAt: String? = null,
+    val closedAt: String? = null,
+    val assignedTo: String? = null,
+    val tags: List<String> = emptyList(),
+    val autoCreated: Boolean = false,
+    val updateHistory: List<TicketUpdateEntry> = emptyList()
+)
+
+@Serializable
+data class TicketsResponse(
+    val tickets: List<SupportTicket> = emptyList(),
+    val total: Int = 0,
+    val page: Int = 0,
+    val pageSize: Int = 20
+)
+
+@Serializable
+data class CreateTicketRequest(
+    val sessionId: String,  // ID сессии чата (обязательное поле)
+    val title: String,
+    val description: String,
+    val priority: String = "MEDIUM",
+    val category: String? = null,
+    val tags: List<String> = emptyList()
+)
+
+@Serializable
+data class UpdateTicketRequest(
+    val status: String? = null,
+    val priority: String? = null,
+    val assignedTo: String? = null,
+    val category: String? = null,
+    val tags: List<String>? = null
 )

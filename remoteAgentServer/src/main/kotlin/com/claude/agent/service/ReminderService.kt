@@ -8,6 +8,7 @@ import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.slf4j.LoggerFactory
@@ -470,6 +471,118 @@ class ReminderService(
         } catch (e: Exception) {
             logger.error("Error handling recurring reminder: ${e.message}", e)
             markNotified(reminder.id)
+        }
+    }
+
+    /**
+     * Умное создание или обновление напоминания.
+     * Если в сессии уже есть незавершенная задача того же типа - обновляет её контекст.
+     * Иначе создает новую задачу.
+     */
+    fun findOrCreateReminder(
+        text: String,
+        dueAt: String,
+        sessionId: String? = null,
+        recurrenceType: String = "none",
+        recurrenceInterval: Int = 1,
+        recurrenceEndDate: String? = null,
+        taskType: String = "reminder",
+        taskContext: String? = null,
+        forceCreate: Boolean = false
+    ): Reminder {
+        // Если нет sessionId или это простое напоминание - всегда создаем новое
+        if (sessionId == null || taskType == "reminder" || forceCreate) {
+            return addReminder(text, dueAt, sessionId, recurrenceType, recurrenceInterval, recurrenceEndDate, taskType, taskContext)
+        }
+
+        // Ищем существующие незавершенные задачи того же типа в этой сессии
+        val existingReminders = conversationRepository.findPendingRemindersBySession(sessionId, taskType)
+
+        if (existingReminders.isEmpty()) {
+            // Нет существующих задач - создаем новую
+            logger.info("No existing $taskType tasks found in session $sessionId, creating new one")
+            return addReminder(text, dueAt, sessionId, recurrenceType, recurrenceInterval, recurrenceEndDate, taskType, taskContext)
+        }
+
+        // Есть существующая задача - обновляем её контекст
+        val existingReminder = existingReminders.first()
+        logger.info("Found existing $taskType task ${existingReminder.id} in session $sessionId, updating context")
+
+        // Объединяем контексты
+        val mergedContext = mergeTaskContexts(existingReminder.taskContext, taskContext)
+
+        // Обновляем задачу
+        conversationRepository.updateReminder(
+            id = existingReminder.id,
+            text = text, // Обновляем текст на более актуальный
+            dueAt = dueAt, // Обновляем время если изменилось
+            taskContext = mergedContext
+        )
+
+        // Перезапускаем таймер с новым временем
+        scheduleReminder(existingReminder.copy(
+            text = text,
+            due_at = dueAt,
+            taskContext = mergedContext
+        ))
+
+        logger.info("Updated existing reminder ${existingReminder.id} with new context")
+
+        // Возвращаем обновленную задачу
+        return existingReminder.copy(
+            text = text,
+            due_at = dueAt,
+            taskContext = mergedContext,
+            updated_at = Instant.now().toString()
+        )
+    }
+
+    /**
+     * Объединяет два JSON контекста задачи.
+     * Новый контекст дополняет существующий, не перезаписывая важные поля.
+     */
+    private fun mergeTaskContexts(existingContext: String?, newContext: String?): String? {
+        if (existingContext == null) return newContext
+        if (newContext == null) return existingContext
+
+        return try {
+            val existing = Json.parseToJsonElement(existingContext).jsonObject.toMutableMap()
+            val new = Json.parseToJsonElement(newContext).jsonObject
+
+            // Добавляем новые поля или обновляем существующие
+            new.forEach { (key, value) ->
+                when (key) {
+                    "user_request" -> {
+                        // Для user_request - добавляем как дополнение
+                        val existingRequest = existing["user_request"]?.jsonPrimitive?.content ?: ""
+                        val newRequest = value.jsonPrimitive.content
+                        if (existingRequest.isNotEmpty() && newRequest != existingRequest) {
+                            existing["user_request"] = JsonPrimitive("$existingRequest\n\nДополнение: $newRequest")
+                        } else {
+                            existing["user_request"] = value
+                        }
+                    }
+                    "accumulated_results" -> {
+                        // Для accumulated_results - объединяем
+                        val existingResults = existing["accumulated_results"]?.jsonPrimitive?.content ?: ""
+                        val newResults = value.jsonPrimitive.content
+                        if (existingResults.isNotEmpty() && newResults != existingResults) {
+                            existing["accumulated_results"] = JsonPrimitive("$existingResults\n\n$newResults")
+                        } else {
+                            existing["accumulated_results"] = value
+                        }
+                    }
+                    else -> {
+                        // Остальные поля - обновляем
+                        existing[key] = value
+                    }
+                }
+            }
+
+            Json.encodeToString(JsonObject(existing))
+        } catch (e: Exception) {
+            logger.error("Error merging task contexts: ${e.message}")
+            newContext // В случае ошибки возвращаем новый контекст
         }
     }
 

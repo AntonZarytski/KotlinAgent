@@ -50,3 +50,24 @@ object Reminders : Table("reminders") {
     val taskContext = text("task_context").nullable() // JSON with task details (user request, tool name, parameters, etc.)
     override val primaryKey = PrimaryKey(id)
 }
+
+// Таблица тикетов поддержки
+object Tickets : Table("tickets") {
+    val id = varchar("id", 255).uniqueIndex()                    // T-001, T-002, etc.
+    val sessionId = varchar("session_id", 255)                   // ID сессии чата (обязательное поле)
+    val title = varchar("title", 500)                            // Заголовок тикета
+    val description = text("description")                        // Описание проблемы
+    val status = varchar("status", 50).default("OPEN")          // OPEN, IN_PROGRESS, WAITING_FOR_USER, RESOLVED, CLOSED
+    val priority = varchar("priority", 50).default("MEDIUM")    // LOW, MEDIUM, HIGH, CRITICAL
+    val category = varchar("category", 100).nullable()           // Категория проблемы
+    val createdAt = varchar("created_at", 50)                   // Дата создания
+    val updatedAt = varchar("updated_at", 50)                   // Дата последнего обновления
+    val resolvedAt = varchar("resolved_at", 50).nullable()      // Дата решения
+    val closedAt = varchar("closed_at", 50).nullable()          // Дата закрытия
+    val assignedTo = varchar("assigned_to", 255).nullable()     // Кому назначен
+    val tags = text("tags").default("[]")                        // JSON массив тегов
+    val autoCreated = bool("auto_created").default(false)       // Создан автоматически AI
+    val updateHistory = text("update_history").default("[]")    // JSON массив истории обновлений
+
+    override val primaryKey = PrimaryKey(id)
+}
