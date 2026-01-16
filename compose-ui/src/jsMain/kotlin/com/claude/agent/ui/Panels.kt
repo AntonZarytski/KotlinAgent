@@ -338,7 +338,7 @@ fun SettingsPanel(
                                 property("width", "100%")
                             }
                             onInput { event ->
-                                val value = (event.target as HTMLInputElement).value.toIntOrNull() ?: 3
+                                val value = (event.target as HTMLInputElement).value.toIntOrNull() ?: 2
                                 onSettingsChange(settings.copy(ragTopK = value))
                             }
                         }
@@ -384,7 +384,7 @@ fun SettingsPanel(
                                 property("width", "100%")
                             }
                             onInput { event ->
-                                val value = (event.target as HTMLInputElement).value.toFloatOrNull() ?: 0.3f
+                                val value = (event.target as HTMLInputElement).value.toFloatOrNull() ?: 0.4f
                                 onSettingsChange(settings.copy(ragMinSimilarity = value))
                             }
                         }
@@ -398,6 +398,41 @@ fun SettingsPanel(
                             Text("Порог cosine similarity (выше = строже фильтрация)")
                         }
                     }
+                }
+            }
+
+            // File Context Checkbox
+            Div({ style { property("margin-bottom", "24px") } }) {
+                Label(null, {
+                    style {
+                        property("display", "flex")
+                        property("align-items", "center")
+                        property("gap", "12px")
+                        property("cursor", "pointer")
+                        property("padding", "12px 16px")
+                        property("background", "#fef3c7")
+                        property("border", "2px solid #fbbf24")
+                        property("border-radius", "12px")
+                    }
+                }) {
+                    CheckboxInput {
+                        checked(settings.fileContextEnabled)
+                        onInput { event ->
+                            val checked = (event.target as HTMLInputElement).checked
+                            onSettingsChange(settings.copy(fileContextEnabled = checked))
+                        }
+                    }
+                    Text("📁 Работать с выбранными файлами")
+                }
+                Div({
+                    style {
+                        property("font-size", "12px")
+                        property("color", "#92400e")
+                        property("margin-top", "8px")
+                        property("padding-left", "16px")
+                    }
+                }) {
+                    Text("При включении передавать содержимое выбранных файлов в контекст")
                 }
             }
 

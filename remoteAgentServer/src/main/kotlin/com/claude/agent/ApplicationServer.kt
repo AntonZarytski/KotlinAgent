@@ -3,10 +3,13 @@ package com.claude.agent
 import com.claude.agent.config.AppConfig
 import com.claude.agent.config.PromptCachingConfig
 import com.claude.agent.config.ToolsFilteringConfig
+import com.claude.agent.config.McpResultsConfig
+import com.claude.agent.config.CompressionConfig
 import com.claude.agent.database.ConversationRepository
 import com.claude.agent.database.DatabaseFactory
 import com.claude.agent.database.TicketRepository
 import com.claude.agent.routes.chatRoutes
+import com.claude.agent.routes.fileTreeRoutes
 import com.claude.agent.routes.healthRoutes
 import com.claude.agent.routes.metricsRoutes
 import com.claude.agent.routes.ragRoutes
@@ -21,8 +24,11 @@ import com.claude.agent.service.GeolocationService
 import com.claude.agent.service.HistoryCompressor
 import com.claude.agent.service.TokenMetricsService
 import com.claude.agent.service.ToolsFilterService
+import com.claude.agent.service.McpResultsFilterService
 import com.claude.agent.llm.mcp.MCPTools
+import com.claude.agent.llm.mcp.Mcp
 import com.claude.agent.llm.mcp.local.ActionPlannerMcp
+import com.claude.agent.llm.mcp.local.ToolChainMcp
 import com.claude.agent.llm.mcp.providers.RemoteMcpProvider
 import com.claude.agent.service.WebSocketService
 import com.claude.agent.llm.mcp.local.ChatSummaryMcp
@@ -345,8 +351,9 @@ fun Application.module() {
     val supportMcp = SupportMcp(dataPath = "support_data")
 
     val localMcpProvider = LocalMcpProvider(
-        listOf(
-            ActionPlannerMcp(),
+        listOf<Mcp.Local>(
+            ToolChainMcp(),              // Легковесный планировщик цепочек
+            ActionPlannerMcp(),          // Тяжелый планировщик (выключен по умолчанию)
             WeatherMcp(httpClient, geolocationService),
             SolarActivityMcp(httpClient, geolocationService),
             ChatSummaryMcp(),
@@ -361,6 +368,7 @@ fun Application.module() {
     // === Инициализация сервисов оптимизации ===
     val tokenMetricsService = TokenMetricsService()
     val toolsFilterService = ToolsFilterService()
+    val mcpResultsFilterService = McpResultsFilterService()
 
     val mcpTools = MCPTools(localMcpProvider = localMcpProvider, remoteMcpProvider = remoteMcpProvider)
 
@@ -373,6 +381,7 @@ fun Application.module() {
         webSocketService = webSocketService,
         tokenMetricsService = tokenMetricsService,
         toolsFilterService = toolsFilterService,
+        mcpResultsFilterService = mcpResultsFilterService,
         ragService = ragService,
         ollamaEmbeddingClient = ollamaEmbeddingClient
     )
@@ -403,7 +412,9 @@ fun Application.module() {
     logger.info("Token optimization: ENABLED")
     logger.info("  - Prompt Caching: ${PromptCachingConfig.ENABLED}")
     logger.info("  - Tools Filtering: ${ToolsFilteringConfig.ENABLED}")
-    logger.info("  - History Compression: ENABLED")
+    logger.info("  - MCP Results Filtering: ${McpResultsConfig.TRUNCATE_LARGE_RESULTS} (max=${McpResultsConfig.MAX_RESULT_LENGTH})")
+    logger.info("  - History Compression: ENABLED (threshold=${CompressionConfig.THRESHOLD}, keep=${CompressionConfig.KEEP_RECENT})")
+    logger.info("  - Tool Chains: ENABLED (ToolChainMcp)")
     logger.info("================================")
 
     // === Конфигурация Ktor ===
@@ -523,6 +534,9 @@ fun Application.module() {
 
         // Support endpoints
         supportRoutes(supportService, ticketRepository, webSocketService, repository)
+
+        // File tree endpoints
+        fileTreeRoutes(mcpTools, repository)
 
         // Статические файлы (UI) - ДОЛЖНЫ БЫТЬ В КОНЦЕ!
 

@@ -125,6 +125,7 @@ class AndroidStudioLocalMcp : Mcp.Local {
             - browse_files — список файлов и папок относительно корня проекта
             - read_file — чтение файла относительно корня проекта
             - save_log — сохранить переданное содержимое в файл на локальной машине
+            - get_file_tree — получить дерево файлов проекта (исключая build, .idea, .gradle, .kotlin)
         
             КРИТИЧЕСКИЕ ПРАВИЛА:
         
@@ -159,6 +160,7 @@ class AndroidStudioLocalMcp : Mcp.Local {
                             add("browse_files")
                             add("read_file")
                             add("save_log")
+                            add("get_file_tree")
                         }
                     }
                     putJsonObject("project_path") {
@@ -220,6 +222,15 @@ class AndroidStudioLocalMcp : Mcp.Local {
                         put("type", "string")
                         put("description", "Name for the log file (without extension)")
                         put("default", "log")
+                    }
+                    putJsonObject("root_path") {
+                        put("type", "string")
+                        put("description", "Root path for file tree (for get_file_tree). If not specified, uses initialAndroidProjectPath")
+                    }
+                    putJsonObject("max_depth") {
+                        put("type", "integer")
+                        put("description", "Maximum depth for file tree (for get_file_tree)")
+                        put("default", 10)
                     }
                 }
                 putJsonArray("required") { add("action") }

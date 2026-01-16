@@ -32,6 +32,7 @@ class TokenMetricsService {
     private val compressionSavings = AtomicLong(0)
     private val cachingSavings = AtomicLong(0)
     private val toolFilteringSavings = AtomicLong(0)
+    private val mcpFilteringSavings = AtomicLong(0)
     
     data class SessionTokenMetrics(
         val sessionId: String,
@@ -54,13 +55,14 @@ class TokenMetricsService {
         val compressionSavings: Long,
         val cachingSavings: Long,
         val toolFilteringSavings: Long,
+        val mcpFilteringSavings: Long,
         val averageInputPerRequest: Double,
         val averageOutputPerRequest: Double,
         val cacheHitRate: Double,
         val topSessions: List<SessionTokenMetrics>
     ) {
         val totalSavings: Long
-            get() = compressionSavings + cachingSavings + toolFilteringSavings
+            get() = compressionSavings + cachingSavings + toolFilteringSavings + mcpFilteringSavings
     }
     
     /**
@@ -120,6 +122,14 @@ class TokenMetricsService {
         toolFilteringSavings.addAndGet(savedTokens)
         logger.info("💰 Tool filtering saved ~$savedTokens tokens")
     }
+
+    /**
+     * Записывает экономию от фильтрации MCP результатов
+     */
+    fun recordMcpFilteringSavings(savedTokens: Long) {
+        mcpFilteringSavings.addAndGet(savedTokens)
+        logger.info("💰 MCP results filtering saved ~$savedTokens tokens")
+    }
     
     /**
      * Получает текущий снимок метрик
@@ -146,6 +156,7 @@ class TokenMetricsService {
             compressionSavings = compressionSavings.get(),
             cachingSavings = cachingSavings.get(),
             toolFilteringSavings = toolFilteringSavings.get(),
+            mcpFilteringSavings = mcpFilteringSavings.get(),
             averageInputPerRequest = avgInput,
             averageOutputPerRequest = avgOutput,
             cacheHitRate = cacheHitRate,
@@ -171,6 +182,7 @@ class TokenMetricsService {
         compressionSavings.set(0)
         cachingSavings.set(0)
         toolFilteringSavings.set(0)
+        mcpFilteringSavings.set(0)
         sessionMetrics.clear()
         logger.info("Token metrics reset")
     }

@@ -358,4 +358,22 @@ object ApiClient {
             throw Exception("Failed to delete ticket: ${response.statusText}")
         }
     }
+
+    // File Tree API methods
+    suspend fun getFileTree(sessionId: String? = null, rootPath: String? = null, maxDepth: Int = 10): FileTreeResponse {
+        val params = buildString {
+            append("?max_depth=$maxDepth")
+            if (sessionId != null) append("&session_id=$sessionId")
+            if (rootPath != null) append("&root_path=$rootPath")
+        }
+        return get("/api/file-tree$params") { text ->
+            jsonParser.decodeFromString<FileTreeResponse>(text)
+        }
+    }
+
+    suspend fun setProjectPath(request: SetProjectPathRequest) {
+        post("/api/file-tree/set-project", request) { text ->
+            jsonParser.decodeFromString<FileTreeResponse>(text)
+        }
+    }
 }

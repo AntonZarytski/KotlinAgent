@@ -17,6 +17,7 @@ class LocalAndroidStudioAgent(
     private val vpsUrl: String,
     private val agentId: String = "android-studio-${System.getenv("COMPUTERNAME")}",
     initialAndroidProjectPath: String? = "/Users/anton/StudioProjects"
+//    initialAndroidProjectPath: String? = "/Users/aliaksandramolchan/StudioProjects"
 ) {
     private val logger = LoggerFactory.getLogger(LocalAndroidStudioAgent::class.java)
 
@@ -449,6 +450,10 @@ class LocalAndroidStudioAgent(
             "save_log" -> {
                 logger.info("→ [EXEC_CMD] Calling saveLog")
                 saveLog(arguments)
+            }
+            "get_file_tree" -> {
+                logger.info("→ [EXEC_CMD] Calling getFileTree")
+                getFileTree(arguments)
             }
             else -> {
                 logger.error("❌ [EXEC_CMD] Unknown action: $action")
@@ -1259,6 +1264,118 @@ class LocalAndroidStudioAgent(
             logger.error(" Exception during saveLog")
             e.printStackTrace()
             errorJson("Save log failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Получить дерево файлов проекта
+     * Исключает служебные папки: build, .idea, .gradle, .kotlin, .git, node_modules
+     */
+    private suspend fun getFileTree(arguments: JsonObject): String = withContext(Dispatchers.IO) {
+        logger.info("📁 [FILE_TREE] Getting file tree")
+        logger.debug("   Arguments: $arguments")
+
+        try {
+            // Определяем корневую директорию
+            val rootPath = arguments["root_path"]?.jsonPrimitive?.content ?: androidProjectPath
+
+            if (rootPath == null) {
+                logger.error("❌ [FILE_TREE] Root path not configured")
+                return@withContext errorJson("Root path not configured. Use root_path parameter or set androidProjectPath.")
+            }
+
+            val rootDir = File(rootPath)
+            logger.info("   Root dir: ${rootDir.absolutePath}")
+
+            if (!rootDir.exists()) {
+                logger.error("❌ [FILE_TREE] Root directory does not exist")
+                return@withContext errorJson("Root directory does not exist: ${rootDir.absolutePath}")
+            }
+
+            if (!rootDir.isDirectory) {
+                logger.error("❌ [FILE_TREE] Root path is not a directory")
+                return@withContext errorJson("Root path is not a directory: ${rootDir.absolutePath}")
+            }
+
+            val maxDepth = arguments["max_depth"]?.jsonPrimitive?.intOrNull ?: 10
+            logger.info("   Max depth: $maxDepth")
+
+            // Строим дерево
+            val tree = buildFileTreeNode(rootDir, rootDir, maxDepth, 0)
+
+            val result = buildJsonObject {
+                put("status", "success")
+                put("root_path", rootDir.absolutePath)
+                put("max_depth", maxDepth)
+                if (tree != null) {
+                    put("tree", tree)
+                }
+            }.toString()
+
+            logger.info("✅ [FILE_TREE] File tree built successfully")
+            return@withContext result
+
+        } catch (e: Exception) {
+            logger.error("❌ [FILE_TREE] Exception occurred", e)
+            logger.error("   Error: ${e.message}")
+            errorJson("Get file tree failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Рекурсивно строит узел дерева файлов
+     */
+    private fun buildFileTreeNode(
+        file: File,
+        rootDir: File,
+        maxDepth: Int,
+        currentDepth: Int
+    ): JsonObject? {
+        // Проверка глубины
+        if (currentDepth > maxDepth) {
+            return null
+        }
+
+        // Фильтрация служебных папок
+        val excludedDirs = setOf("build", ".idea", ".gradle", ".kotlin", ".git", "node_modules", ".android", "gradle", "captures")
+        if (file.isDirectory && file.name in excludedDirs) {
+            logger.debug("   Skipping excluded directory: ${file.name}")
+            return null
+        }
+
+        // Фильтрация служебных файлов
+        val excludedExtensions = setOf(".iml", ".class", ".dex", ".apk", ".ap_", ".aab")
+        if (file.isFile && excludedExtensions.any { file.name.endsWith(it) }) {
+            logger.debug("   Skipping excluded file: ${file.name}")
+            return null
+        }
+
+        return buildJsonObject {
+            put("name", file.name)
+            put("type", if (file.isDirectory) "directory" else "file")
+            put("path", file.relativeTo(rootDir).path.takeIf { it.isNotEmpty() } ?: file.name)
+            put("absolute_path", file.absolutePath)
+
+            if (file.isFile) {
+                put("size", file.length())
+                put("extension", file.extension)
+                put("last_modified", file.lastModified())
+            }
+
+            if (file.isDirectory) {
+                val children = file.listFiles()
+                    ?.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
+                    ?.mapNotNull { childFile ->
+                        buildFileTreeNode(childFile, rootDir, maxDepth, currentDepth + 1)
+                    } ?: emptyList()
+
+                putJsonArray("children") {
+                    children.forEach { child ->
+                        add(child)
+                    }
+                }
+                put("children_count", children.size)
+            }
         }
     }
 

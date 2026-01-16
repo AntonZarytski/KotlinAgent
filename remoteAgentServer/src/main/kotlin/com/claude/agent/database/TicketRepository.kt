@@ -124,13 +124,45 @@ class TicketRepository {
                 .orderBy(Tickets.createdAt to SortOrder.DESC)
                 .limit(pageSize, offset = (page * pageSize).toLong())
                 .map { rowToTicket(it) }
-            
+
             TicketListResponse(
                 tickets = tickets,
                 total = total,
                 page = page,
                 pageSize = pageSize
             )
+        }
+    }
+
+    /**
+     * Фильтрует ВСЕ тикеты (по всем сессиям) по критериям
+     */
+    fun filterAllTickets(
+        priority: TicketPriority? = null,
+        status: TicketStatus? = null,
+        category: String? = null,
+        page: Int = 0,
+        pageSize: Int = 100
+    ): List<SupportTicket> {
+        return transaction(DatabaseFactory.getMainDatabase()) {
+            var query = Tickets.selectAll()
+
+            // Применяем фильтры
+            if (priority != null) {
+                query = query.andWhere { Tickets.priority eq priority.name }
+            }
+
+            if (status != null) {
+                query = query.andWhere { Tickets.status eq status.name }
+            }
+
+            if (category != null) {
+                query = query.andWhere { Tickets.category eq category }
+            }
+
+            query.orderBy(Tickets.priority to SortOrder.DESC, Tickets.createdAt to SortOrder.DESC)
+                .limit(pageSize, offset = (page * pageSize).toLong())
+                .map { rowToTicket(it) }
         }
     }
     

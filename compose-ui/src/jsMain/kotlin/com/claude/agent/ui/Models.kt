@@ -52,9 +52,10 @@ data class Settings(
     val showAllIntermediateMessages: Boolean = false,  // Изменено на false - промежуточные сообщения не сохраняются в истории
     val enabledTools: Set<String> = emptySet(),
     val useRag: Boolean = false,                // Использовать RAG для контекста
-    val ragTopK: Int = 3,                       // Количество релевантных чанков
-    val ragMinSimilarity: Float = 0.3f,         // Минимальный порог схожести (0.0-1.0)
-    val ragFilterEnabled: Boolean = true        // Включить фильтрацию по порогу
+    val ragTopK: Int = 2,                       // Количество релевантных чанков (было 3)
+    val ragMinSimilarity: Float = 0.4f,         // Минимальный порог схожести (было 0.3)
+    val ragFilterEnabled: Boolean = true,       // Включить фильтрацию по порогу
+    val fileContextEnabled: Boolean = false     // Работать с выбранными файлами
 )
 
 @Serializable
@@ -70,9 +71,11 @@ data class ChatRequest(
     val user_location: UserLocation? = null,
     val show_intermediate_messages: Boolean = true,
     val use_rag: Boolean = false,               // Использовать RAG для контекста
-    val rag_top_k: Int = 3,                     // Количество релевантных чанков
-    val rag_min_similarity: Double = 0.3,       // Минимальный порог схожести (0.0-1.0)
-    val rag_filter_enabled: Boolean = true      // Включить фильтрацию по порогу
+    val rag_top_k: Int = 2,                     // Количество релевантных чанков (было 3)
+    val rag_min_similarity: Double = 0.4,       // Минимальный порог схожести (было 0.3)
+    val rag_filter_enabled: Boolean = true,     // Включить фильтрацию по порогу
+    val file_context_enabled: Boolean = false,  // Работать с выбранными файлами
+    val selected_files: List<String> = emptyList() // Пути к выбранным файлам
 )
 
 @Serializable
@@ -183,4 +186,32 @@ data class UpdateTicketRequest(
     val assignedTo: String? = null,
     val category: String? = null,
     val tags: List<String>? = null
+)
+
+// File Tree Models
+@Serializable
+data class FileTreeNode(
+    val name: String,
+    val type: String, // "file" or "directory"
+    val path: String,
+    val absolute_path: String,
+    val size: Long? = null,
+    val extension: String? = null,
+    val last_modified: Long? = null,
+    val children: List<FileTreeNode> = emptyList(),
+    val children_count: Int = 0
+)
+
+@Serializable
+data class FileTreeResponse(
+    val status: String,
+    val root_path: String,
+    val max_depth: Int,
+    val tree: FileTreeNode? = null
+)
+
+@Serializable
+data class SetProjectPathRequest(
+    val sessionId: String,
+    val projectPath: String
 )

@@ -157,7 +157,9 @@ $context
                 useRag = false, // Отключаем RAG для /help, т.к. контекст уже получен
                 ragTopK = request.rag_top_k,
                 ragMinSimilarity = request.rag_min_similarity,
-                ragFilterEnabled = request.rag_filter_enabled
+                ragFilterEnabled = request.rag_filter_enabled,
+                fileContextEnabled = request.file_context_enabled,
+                selectedFiles = request.selected_files
             )
 
             // Обработка ошибок

@@ -8,6 +8,7 @@ import kotlinx.serialization.json.*
 import kotlinx.serialization.encodeToString
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.time.Instant.now
 
 /**
  * MCP инструмент для работы с системой поддержки (CRM/тикеты)
@@ -50,11 +51,12 @@ class SupportMcp(
                 ФУНКЦИИ:
                 1. create_ticket - создать новый тикет (используй когда пользователь сообщает о проблеме/задаче)
                 2. get_ticket - получить детали тикета по ID
-                3. search_tickets - найти тикеты текущей сессии чата
-                4. add_info - добавить дополнительную информацию к существующему тикету
-                5. update_ticket - обновить тикет (статус, приоритет, категорию, теги)
-                6. delete_ticket - удалить тикет
-                7. get_session_history - получить историю тикетов сессии
+                3. search_tickets - найти все тикеты текущей сессии чата
+                4. filter_tickets - отфильтровать тикеты по критериям (приоритет, статус, категория)
+                5. add_info - добавить дополнительную информацию к существующему тикету
+                6. update_ticket - обновить тикет (статус, приоритет, категорию, теги)
+                7. delete_ticket - удалить тикет
+                8. get_session_history - получить историю тикетов сессии
 
                 КОГДА СОЗДАВАТЬ ТИКЕТ:
                 - Пользователь сообщает о проблеме, баге или ошибке
@@ -67,6 +69,12 @@ class SupportMcp(
                 - Пользователь уточняет проблему в рамках текущей сессии
                 - В сессии уже есть открытый тикет по этой теме
                 - НЕ создавай новый тикет, если можно обновить существующий!
+
+                ГЛОБАЛЬНЫЙ ПОИСК:
+                - filter_tickets по умолчанию ищет только в текущей сессии
+                - Для поиска по ВСЕМ сессиям используй параметр search_scope="global"
+                - Примеры: "покажи все задачи в работе", "найди все HIGH priority задачи" → используй global
+                - Примеры: "мои задачи", "задачи в этом чате" → используй session
 
                 ВАЖНО:
                 - Тикеты привязаны к сессиям чата (session_id)
@@ -86,6 +94,7 @@ class SupportMcp(
                             JsonPrimitive("create_ticket"),
                             JsonPrimitive("get_ticket"),
                             JsonPrimitive("search_tickets"),
+                            JsonPrimitive("filter_tickets"),
                             JsonPrimitive("add_info"),
                             JsonPrimitive("update_ticket"),
                             JsonPrimitive("delete_ticket"),
@@ -95,7 +104,15 @@ class SupportMcp(
                     )),
                     "session_id" to JsonObject(mapOf(
                         "type" to JsonPrimitive("string"),
-                        "description" to JsonPrimitive("ID сессии чата (автоматически подставляется если не указан)")
+                        "description" to JsonPrimitive("ID сессии чата (автоматически подставляется если не указан). Оставь пустым или используй 'all' для поиска по всем сессиям.")
+                    )),
+                    "search_scope" to JsonObject(mapOf(
+                        "type" to JsonPrimitive("string"),
+                        "enum" to JsonArray(listOf(
+                            JsonPrimitive("session"),
+                            JsonPrimitive("global")
+                        )),
+                        "description" to JsonPrimitive("Область поиска: 'session' - только в текущей сессии, 'global' - по всем тикетам (для filter_tickets)")
                     )),
                     "ticket_id" to JsonObject(mapOf(
                         "type" to JsonPrimitive("string"),
@@ -144,6 +161,31 @@ class SupportMcp(
                     "additional_info" to JsonObject(mapOf(
                         "type" to JsonPrimitive("string"),
                         "description" to JsonPrimitive("Дополнительная информация для добавления к тикету (для add_info)")
+                    )),
+                    "filter_priority" to JsonObject(mapOf(
+                        "type" to JsonPrimitive("string"),
+                        "enum" to JsonArray(listOf(
+                            JsonPrimitive("LOW"),
+                            JsonPrimitive("MEDIUM"),
+                            JsonPrimitive("HIGH"),
+                            JsonPrimitive("CRITICAL")
+                        )),
+                        "description" to JsonPrimitive("Фильтр по приоритету (для filter_tickets)")
+                    )),
+                    "filter_status" to JsonObject(mapOf(
+                        "type" to JsonPrimitive("string"),
+                        "enum" to JsonArray(listOf(
+                            JsonPrimitive("OPEN"),
+                            JsonPrimitive("IN_PROGRESS"),
+                            JsonPrimitive("WAITING_FOR_USER"),
+                            JsonPrimitive("RESOLVED"),
+                            JsonPrimitive("CLOSED")
+                        )),
+                        "description" to JsonPrimitive("Фильтр по статусу (для filter_tickets)")
+                    )),
+                    "filter_category" to JsonObject(mapOf(
+                        "type" to JsonPrimitive("string"),
+                        "description" to JsonPrimitive("Фильтр по категории (для filter_tickets)")
                     ))
                 )),
                 "required" to JsonArray(listOf(JsonPrimitive("action")))
@@ -194,6 +236,36 @@ class SupportMcp(
                         ?: sessionId
                         ?: return errorJson("session_id is required")
                     searchTickets(sid)
+                }
+                "filter_tickets" -> {
+                    val searchScope = arguments["search_scope"]?.jsonPrimitive?.content ?: "session"
+                    val sid = arguments["session_id"]?.jsonPrimitive?.content ?: sessionId
+
+                    val filterPriority = arguments["filter_priority"]?.jsonPrimitive?.content?.let {
+                        try {
+                            TicketPriority.valueOf(it)
+                        } catch (e: IllegalArgumentException) {
+                            null
+                        }
+                    }
+                    val filterStatus = arguments["filter_status"]?.jsonPrimitive?.content?.let {
+                        try {
+                            TicketStatus.valueOf(it)
+                        } catch (e: IllegalArgumentException) {
+                            null
+                        }
+                    }
+                    val filterCategory = arguments["filter_category"]?.jsonPrimitive?.content
+
+                    // Если search_scope = "global" или sid = "all", ищем по всем сессиям
+                    if (searchScope == "global" || sid == "all") {
+                        filterAllTickets(filterPriority, filterStatus, filterCategory)
+                    } else {
+                        if (sid == null) {
+                            return errorJson("session_id is required for session scope search")
+                        }
+                        filterTickets(sid, filterPriority, filterStatus, filterCategory)
+                    }
                 }
                 "add_info" -> {
                     val ticketId = arguments["ticket_id"]?.jsonPrimitive?.content
@@ -325,6 +397,87 @@ class SupportMcp(
         return json.encodeToString(McpSessionTicketsResponse.serializer(), response)
     }
 
+    /**
+     * Фильтрует тикеты по заданным критериям в рамках сессии
+     */
+    private fun filterTickets(
+        sessionId: String,
+        filterPriority: TicketPriority?,
+        filterStatus: TicketStatus?,
+        filterCategory: String?
+    ): String {
+        if (ticketRepository == null) {
+            return errorJson("Ticket repository not initialized")
+        }
+
+        // Получаем все тикеты сессии
+        var sessionTickets = ticketRepository!!.getSessionTickets(sessionId)
+
+        // Применяем фильтры
+        if (filterPriority != null) {
+            sessionTickets = sessionTickets.filter { it.priority == filterPriority }
+            logger.info("Filtered by priority $filterPriority: ${sessionTickets.size} tickets")
+        }
+
+        if (filterStatus != null) {
+            sessionTickets = sessionTickets.filter { it.status == filterStatus }
+            logger.info("Filtered by status $filterStatus: ${sessionTickets.size} tickets")
+        }
+
+        if (filterCategory != null) {
+            sessionTickets = sessionTickets.filter { it.category == filterCategory }
+            logger.info("Filtered by category $filterCategory: ${sessionTickets.size} tickets")
+        }
+
+        val stats = mapOf(
+            "total_found" to sessionTickets.size
+        )
+
+        logger.info("Filter results (session): priority=${filterPriority?.name}, status=${filterStatus?.name}, category=$filterCategory, found=${sessionTickets.size}")
+
+        val response = McpSessionTicketsResponse(
+            sessionId = sessionId,
+            tickets = sessionTickets,
+            count = sessionTickets.size,
+            stats = stats
+        )
+        return json.encodeToString(McpSessionTicketsResponse.serializer(), response)
+    }
+
+    /**
+     * Фильтрует ВСЕ тикеты (по всем сессиям) по заданным критериям
+     */
+    private fun filterAllTickets(
+        filterPriority: TicketPriority?,
+        filterStatus: TicketStatus?,
+        filterCategory: String?
+    ): String {
+        if (ticketRepository == null) {
+            return errorJson("Ticket repository not initialized")
+        }
+
+        // Получаем все тикеты с фильтрацией
+        val allTickets = ticketRepository!!.filterAllTickets(
+            priority = filterPriority,
+            status = filterStatus,
+            category = filterCategory
+        )
+
+        val stats = mapOf(
+            "total_found" to allTickets.size
+        )
+
+        logger.info("✅ Global filter results: priority=${filterPriority?.name}, status=${filterStatus?.name}, category=$filterCategory, found=${allTickets.size}")
+
+        val response = McpSessionTicketsResponse(
+            sessionId = "all",
+            tickets = allTickets,
+            count = allTickets.size,
+            stats = stats
+        )
+        return json.encodeToString(McpSessionTicketsResponse.serializer(), response)
+    }
+
     private fun updateTicketStatus(ticketId: String, newStatus: String): String {
         val ticketIndex = tickets.indexOfFirst { it.id == ticketId }
         if (ticketIndex == -1) {
@@ -340,9 +493,9 @@ class SupportMcp(
         val oldTicket = tickets[ticketIndex]
         val updatedTicket = oldTicket.copy(
             status = status,
-            updatedAt = java.time.Instant.now().toString(),
+            updatedAt = now().toString(),
             resolvedAt = if (status == TicketStatus.RESOLVED || status == TicketStatus.CLOSED) {
-                java.time.Instant.now().toString()
+                now().toString()
             } else {
                 oldTicket.resolvedAt
             }

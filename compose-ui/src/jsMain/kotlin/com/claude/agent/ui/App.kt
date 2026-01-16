@@ -29,9 +29,11 @@ fun ClaudeChatApp() {
     var showHistoryPanel by remember { mutableStateOf(false) }
     var showReminderPanel by remember { mutableStateOf(false) }
     var showTicketPanel by remember { mutableStateOf(false) }
+    var showFileTreePanel by remember { mutableStateOf(false) }
     var showTokenModal by remember { mutableStateOf(false) }
     var tokenCount by remember { mutableStateOf(0) }
     var selectedTicket by remember { mutableStateOf<SupportTicket?>(null) }
+    var selectedFiles by remember { mutableStateOf<List<String>>(emptyList()) }
 
     var messageCountSinceCompression by remember { mutableStateOf(0) }
     var userLocation by remember { mutableStateOf<UserLocation?>(null) }
@@ -316,6 +318,19 @@ fun ClaudeChatApp() {
             }
         )
 
+        // File Tree Panel
+        if (showFileTreePanel) {
+            FileTreePanel(
+                apiClient = ApiClient,
+                sessionId = currentSessionId,
+                selectedFiles = selectedFiles,
+                onFilesSelected = { files ->
+                    selectedFiles = files
+                },
+                onClose = { showFileTreePanel = false }
+            )
+        }
+
         // Ticket Detail Modal
         if (selectedTicket != null) {
             TicketDetailView(
@@ -398,6 +413,15 @@ fun ClaudeChatApp() {
                         }
                     }
                 },
+                onFileTreeClick = {
+                    showFileTreePanel = !showFileTreePanel
+                    if (showFileTreePanel) {
+                        showSettingsPanel = false
+                        showHistoryPanel = false
+                        showReminderPanel = false
+                        showTicketPanel = false
+                    }
+                },
                 onTokensClick = {
                     scope.launch {
                         if (inputText.isBlank()) {
@@ -448,6 +472,7 @@ fun ClaudeChatApp() {
                             settings = settings,
                             messages = messages,
                             userLocation = userLocation,
+                            selectedFiles = selectedFiles,
                             onMessagesUpdate = { messages = it },
                             onLoadingChange = { isLoading = it },
                             onInputClear = { inputText = "" },
@@ -503,6 +528,7 @@ private suspend fun sendMessage(
     settings: Settings,
     messages: List<Message>,
     userLocation: UserLocation?,
+    selectedFiles: List<String>,
     onMessagesUpdate: (List<Message>) -> Unit,
     onLoadingChange: (Boolean) -> Unit,
     onInputClear: () -> Unit,
@@ -566,7 +592,9 @@ private suspend fun sendMessage(
                 use_rag = settings.useRag,
                 rag_top_k = settings.ragTopK,
                 rag_min_similarity = settings.ragMinSimilarity.toDouble(),
-                rag_filter_enabled = settings.ragFilterEnabled
+                rag_filter_enabled = settings.ragFilterEnabled,
+                file_context_enabled = settings.fileContextEnabled,
+                selected_files = selectedFiles
             )
         )
 

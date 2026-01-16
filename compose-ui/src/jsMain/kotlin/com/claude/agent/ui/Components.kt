@@ -11,6 +11,7 @@ fun ChatHeader(
     onHistoryClick: () -> Unit,
     onReminderClick: () -> Unit,
     onTicketsClick: () -> Unit,
+    onFileTreeClick: () -> Unit,
     onTokensClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
@@ -37,6 +38,13 @@ fun ChatHeader(
                 attr("title", "Тикеты поддержки")
             }) {
                 Text("🎫")
+            }
+            Button({
+                classes("icon-button")
+                onClick { onFileTreeClick() }
+                attr("title", "Дерево файлов")
+            }) {
+                Text("📁")
             }
         }
 

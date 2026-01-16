@@ -31,6 +31,7 @@ fun Route.metricsRoutes(tokenMetricsService: TokenMetricsService) {
                     put("compression", snapshot.compressionSavings)
                     put("caching", snapshot.cachingSavings)
                     put("toolFiltering", snapshot.toolFilteringSavings)
+                    put("mcpFiltering", snapshot.mcpFilteringSavings)
                     put("total", snapshot.totalSavings)
                 }
                 
