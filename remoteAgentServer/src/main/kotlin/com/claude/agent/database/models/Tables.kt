@@ -51,23 +51,26 @@ object Reminders : Table("reminders") {
     override val primaryKey = PrimaryKey(id)
 }
 
-// Таблица тикетов поддержки
-object Tickets : Table("tickets") {
-    val id = varchar("id", 255).uniqueIndex()                    // T-001, T-002, etc.
-    val sessionId = varchar("session_id", 255)                   // ID сессии чата (обязательное поле)
-    val title = varchar("title", 500)                            // Заголовок тикета
-    val description = text("description")                        // Описание проблемы
-    val status = varchar("status", 50).default("OPEN")          // OPEN, IN_PROGRESS, WAITING_FOR_USER, RESOLVED, CLOSED
-    val priority = varchar("priority", 50).default("MEDIUM")    // LOW, MEDIUM, HIGH, CRITICAL
-    val category = varchar("category", 100).nullable()           // Категория проблемы
-    val createdAt = varchar("created_at", 50)                   // Дата создания
-    val updatedAt = varchar("updated_at", 50)                   // Дата последнего обновления
-    val resolvedAt = varchar("resolved_at", 50).nullable()      // Дата решения
-    val closedAt = varchar("closed_at", 50).nullable()          // Дата закрытия
-    val assignedTo = varchar("assigned_to", 255).nullable()     // Кому назначен
-    val tags = text("tags").default("[]")                        // JSON массив тегов
-    val autoCreated = bool("auto_created").default(false)       // Создан автоматически AI
-    val updateHistory = text("update_history").default("[]")    // JSON массив истории обновлений
+// Таблица тикетов поддержки (для долгих задач агента)
+object SupportTickets : Table("support_tickets") {
+    val id = varchar("id", 255).uniqueIndex()          // PRIMARY KEY (UUID)
+    val sessionId = varchar("session_id", 255).references(Sessions.id, onDelete = org.jetbrains.exposed.sql.ReferenceOption.CASCADE)
+    val title = varchar("title", 500)                  // Название задачи
+    val description = text("description")              // Описание задачи
+    val status = varchar("status", 20)                 // opened, inProgress, finished
+    val createdAt = varchar("created_at", 50)         // ISO 8601
+    val updatedAt = varchar("updated_at", 50)         // ISO 8601
+    val finishedAt = varchar("finished_at", 50).nullable()  // ISO 8601, когда завершен
+
+    override val primaryKey = PrimaryKey(id)
+}
+
+// Таблица timeline (логов) для тикетов
+object TicketTimeline : Table("ticket_timeline") {
+    val id = integer("id").autoIncrement()             // PRIMARY KEY
+    val ticketId = varchar("ticket_id", 255).references(SupportTickets.id, onDelete = org.jetbrains.exposed.sql.ReferenceOption.CASCADE)
+    val timestamp = varchar("timestamp", 50)           // ISO 8601
+    val entry = text("entry")                          // Текст лога
 
     override val primaryKey = PrimaryKey(id)
 }

@@ -47,11 +47,10 @@ data class ChatRequest(
     val user_location: UserLocation? = null,
     val show_intermediate_messages: Boolean = true,
     val use_rag: Boolean = false,           // Использовать RAG для контекста
-    val rag_top_k: Int = 2,                 // Количество релевантных чанков (было 3)
-    val rag_min_similarity: Double = 0.4,   // Минимальный порог схожести (было 0.3)
+    val rag_top_k: Int = 3,                 // Количество релевантных чанков
+    val rag_min_similarity: Double = 0.3,   // Минимальный порог схожести (0.0-1.0)
     val rag_filter_enabled: Boolean = true, // Включить фильтрацию по порогу
-    val file_context_enabled: Boolean = false, // Включить контекст выбранных файлов
-    val selected_files: List<String> = emptyList() // Пути к выбранным файлам
+    val selected_files: List<String> = emptyList() // Выбранные файлы из file tree
 )
 
 @Serializable

@@ -15,12 +15,12 @@ fun ClaudeChatApp() {
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
     var sessions by remember { mutableStateOf<List<ChatSession>>(emptyList()) }
     var reminders by remember { mutableStateOf<List<Reminder>>(emptyList()) }
-    var tickets by remember { mutableStateOf<List<SupportTicket>>(emptyList()) }
+    var tickets by remember { mutableStateOf<List<Ticket>>(emptyList()) }
     var tools by remember { mutableStateOf<List<Tool>>(emptyList()) }
     var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     var currentSessionId by remember { mutableStateOf(Utils.generateSessionId()) }
-    var settings by remember { mutableStateOf(Utils.loadSettings()) }
+    var settings by remember { mutableStateOf(Settings()) }
 
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
@@ -28,12 +28,10 @@ fun ClaudeChatApp() {
     var showSettingsPanel by remember { mutableStateOf(false) }
     var showHistoryPanel by remember { mutableStateOf(false) }
     var showReminderPanel by remember { mutableStateOf(false) }
-    var showTicketPanel by remember { mutableStateOf(false) }
     var showFileTreePanel by remember { mutableStateOf(false) }
+    var showTicketsPanel by remember { mutableStateOf(false) }
     var showTokenModal by remember { mutableStateOf(false) }
     var tokenCount by remember { mutableStateOf(0) }
-    var selectedTicket by remember { mutableStateOf<SupportTicket?>(null) }
-    var selectedFiles by remember { mutableStateOf<List<String>>(emptyList()) }
 
     var messageCountSinceCompression by remember { mutableStateOf(0) }
     var userLocation by remember { mutableStateOf<UserLocation?>(null) }
@@ -41,6 +39,12 @@ fun ClaudeChatApp() {
     // Streaming state for real-time message updates
     var streamingText by remember { mutableStateOf<String?>(null) }
     var streamingIteration by remember { mutableStateOf(0) }
+
+    // File tree state
+    var fileTree by remember { mutableStateOf<FileTreeNode?>(null) }
+    var selectedFiles by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var expandedDirs by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var projectPath by remember { mutableStateOf<String?>(null) }
 
     // Track which reminders have been notified to avoid duplicate notifications
     val notifiedReminders = remember { mutableSetOf<String>() }
@@ -100,31 +104,6 @@ fun ClaudeChatApp() {
                 scope.launch {
                     delay(100)
                     Utils.scrollToBottom()
-                }
-            },
-            onTicketCreatedCallback = { ticketData ->
-                try {
-                    console.log("🎫 Ticket created notification: $ticketData")
-                    // Показываем уведомление пользователю
-                    try {
-                        Utils.showBrowserNotification(
-                            "Создан тикет поддержки",
-                            "Ваша проблема зарегистрирована и будет обработана",
-                            "ticket_notification"
-                        )
-                    } catch (e: Exception) {
-                        console.error("Error showing notification: ${e.message}")
-                    }
-                    // Обновляем список тикетов
-                    scope.launch {
-                        try {
-                            loadTickets(tickets) { tickets = it }
-                        } catch (e: Exception) {
-                            console.error("Error loading tickets: ${e.message}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    console.error("Error in ticket created callback: ${e.message}")
                 }
             }
         )
@@ -237,6 +216,12 @@ fun ClaudeChatApp() {
     // Main UI
     Div({
         classes("container")
+        style {
+            property("display", "flex")
+            property("flex-direction", "row")
+            property("width", "100%")
+            property("height", "100%")
+        }
     }) {
         // History Panel
         HistoryPanel(
@@ -297,85 +282,244 @@ fun ClaudeChatApp() {
         )
 
         // Ticket Panel
-        TicketPanel(
-            visible = showTicketPanel,
-            tickets = tickets,
-            onClose = { showTicketPanel = false },
-            onTicketClick = { ticketId ->
-                scope.launch {
-                    try {
-                        val ticket = ApiClient.getTicket(ticketId)
-                        selectedTicket = ticket
-                    } catch (e: Exception) {
-                        console.error("Error loading ticket: ${e.message}")
-                    }
-                }
-            },
-            onRefresh = {
-                scope.launch {
-                    loadTickets(tickets) { tickets = it }
-                }
-            }
-        )
-
-        // File Tree Panel
-        if (showFileTreePanel) {
-            FileTreePanel(
-                apiClient = ApiClient,
-                sessionId = currentSessionId,
-                selectedFiles = selectedFiles,
-                onFilesSelected = { files ->
-                    selectedFiles = files
-                },
-                onClose = { showFileTreePanel = false }
+        if (showTicketsPanel) {
+            TicketPanel(
+                tickets = tickets,
+                onClose = { showTicketsPanel = false }
             )
         }
 
-        // Ticket Detail Modal
-        if (selectedTicket != null) {
-            TicketDetailView(
-                ticket = selectedTicket,
-                onClose = { selectedTicket = null },
-                onUpdateStatus = { newStatus ->
-                    scope.launch {
-                        try {
-                            val updated = ApiClient.updateTicket(
-                                selectedTicket!!.id,
-                                UpdateTicketRequest(status = newStatus)
-                            )
-                            // Если тикет был закрыт и удален (сервер вернул null)
-                            if (updated == null) {
-                                selectedTicket = null // Закрываем модальное окно
-                                console.log("Ticket was closed and auto-deleted")
-                            } else {
-                                selectedTicket = updated
-                            }
-                            loadTickets(tickets) { tickets = it }
-                        } catch (e: Exception) {
-                            console.error("Error updating ticket: ${e.message}")
-                        }
+        // File Tree Panel (left sidebar)
+        if (showFileTreePanel) {
+            Div({
+                classes("file-tree-container")
+                style {
+                    property("width", "300px")
+                    property("height", "100%")
+                    property("border-right", "1px solid #e5e7eb")
+                    property("background", "#f9fafb")
+                    property("overflow-y", "auto")
+                    property("display", "flex")
+                    property("flex-direction", "column")
+                }
+            }) {
+                // Header
+                Div({
+                    style {
+                        property("padding", "12px 16px")
+                        property("border-bottom", "1px solid #e5e7eb")
+                        property("background", "white")
+                        property("font-weight", "600")
+                        property("font-size", "14px")
+                        property("display", "flex")
+                        property("align-items", "center")
+                        property("justify-content", "space-between")
                     }
-                },
-                onGoToChat = { sessionId ->
-                    scope.launch {
-                        loadSession(
-                            sessionId = sessionId,
-                            onSuccess = { history ->
-                                messages = history
-                                currentSessionId = sessionId
-                                messageCountSinceCompression = 0
-                                showTicketPanel = false
-                                selectedTicket = null
+                }) {
+                    Span { Text("📁 Project Files") }
+                    Button({
+                        classes("icon-button")
+                        onClick {
+                            scope.launch {
+                                loadFileTree { tree, path ->
+                                    fileTree = tree
+                                    projectPath = path
+                                }
                             }
-                        )
+                        }
+                        attr("title", "Reload file tree")
+                        style {
+                            property("padding", "4px 8px")
+                            property("font-size", "12px")
+                        }
+                    }) {
+                        Text("🔄")
                     }
                 }
-            )
+
+                // Project path with "Up" button
+                if (projectPath != null) {
+                    Div({
+                        style {
+                            property("padding", "8px 16px")
+                            property("font-size", "11px")
+                            property("color", "#6b7280")
+                            property("border-bottom", "1px solid #e5e7eb")
+                            property("background", "#f3f4f6")
+                            property("display", "flex")
+                            property("align-items", "center")
+                            property("gap", "8px")
+                        }
+                    }) {
+                        // "Up" button to navigate to parent directory
+                        Button({
+                            style {
+                                property("background", "#6366f1")
+                                property("color", "white")
+                                property("border", "none")
+                                property("border-radius", "4px")
+                                property("padding", "4px 8px")
+                                property("cursor", "pointer")
+                                property("font-size", "12px")
+                                property("display", "flex")
+                                property("align-items", "center")
+                                property("gap", "4px")
+                            }
+                            onClick {
+                                console.log("⬆️ Navigating up from: $projectPath")
+                                scope.launch {
+                                    try {
+                                        // Get parent directory
+                                        val parentPath = projectPath?.substringBeforeLast("/")
+                                        if (parentPath != null && parentPath.isNotEmpty()) {
+                                            console.log("⬆️ Parent path: $parentPath")
+                                            val response = ApiClient.setProjectPath(parentPath, currentSessionId)
+                                            if (response.success) {
+                                                console.log("✅ Project path set to: ${response.projectPath}")
+                                                projectPath = response.projectPath ?: parentPath
+
+                                                // Перезагружаем дерево файлов с новым путем
+                                                console.log("🔄 Reloading file tree for parent path...")
+                                                loadFileTree { tree, newPath ->
+                                                    fileTree = tree
+                                                    projectPath = newPath
+                                                    expandedDirs = emptySet()
+                                                    console.log("✅ File tree reloaded for path: $newPath")
+                                                }
+                                            } else {
+                                                console.error("❌ Failed to set project path: ${response.error}")
+                                            }
+                                        } else {
+                                            console.warn("⚠️ Already at root directory")
+                                        }
+                                    } catch (e: Exception) {
+                                        console.error("❌ Error navigating up: ${e.message}")
+                                    }
+                                }
+                            }
+                        }) {
+                            Text("⬆️ Вверх")
+                        }
+
+                        // Current path
+                        Div({
+                            style {
+                                property("flex", "1")
+                                property("word-break", "break-all")
+                            }
+                        }) {
+                            Text(projectPath!!)
+                        }
+                    }
+                }
+
+                // Selected files count
+                if (selectedFiles.isNotEmpty()) {
+                    Div({
+                        style {
+                            property("padding", "8px 16px")
+                            property("font-size", "12px")
+                            property("color", "#059669")
+                            property("background", "#d1fae5")
+                            property("border-bottom", "1px solid #a7f3d0")
+                            property("font-weight", "500")
+                        }
+                    }) {
+                        Text("✓ ${selectedFiles.size} file(s) selected")
+                    }
+                }
+
+                // Tree content
+                Div({
+                    style {
+                        property("flex", "1")
+                        property("overflow-y", "auto")
+                        property("padding", "8px 0")
+                    }
+                }) {
+                    if (fileTree != null) {
+                        FileTreeItem(
+                            node = fileTree!!,
+                            level = 0,
+                            selectedFiles = selectedFiles,
+                            onFileToggle = { filePath ->
+                                selectedFiles = if (selectedFiles.contains(filePath)) {
+                                    selectedFiles - filePath
+                                } else {
+                                    selectedFiles + filePath
+                                }
+                            },
+                            expandedDirs = expandedDirs,
+                            onDirToggle = { dirPath ->
+                                expandedDirs = if (expandedDirs.contains(dirPath)) {
+                                    expandedDirs - dirPath
+                                } else {
+                                    expandedDirs + dirPath
+                                }
+                            },
+                            onProjectPathChange = { relativePath ->
+                                console.log("📁 Double-clicked on folder: $relativePath")
+                                scope.launch {
+                                    try {
+                                        // Формируем полный абсолютный путь
+                                        val currentPath = projectPath ?: ""
+                                        val fullPath = if (currentPath.isEmpty()) {
+                                            relativePath
+                                        } else {
+                                            "$currentPath/$relativePath"
+                                        }
+
+                                        console.log("📁 Setting project path to: $fullPath")
+
+                                        val response = ApiClient.setProjectPath(fullPath, currentSessionId)
+                                        if (response.success) {
+                                            console.log("✅ Project path set to: ${response.projectPath}")
+                                            projectPath = response.projectPath ?: fullPath
+
+                                            // Перезагружаем дерево файлов с новым путем
+                                            console.log("🔄 Reloading file tree for new path...")
+                                            loadFileTree { tree, newPath ->
+                                                fileTree = tree
+                                                projectPath = newPath
+                                                // Сбрасываем состояние раскрытых папок
+                                                expandedDirs = emptySet()
+                                                console.log("✅ File tree reloaded for path: $newPath")
+                                            }
+                                        } else {
+                                            console.error("❌ Failed to set project path: ${response.error}")
+                                        }
+                                    } catch (e: Exception) {
+                                        console.error("❌ Error setting project path: ${e.message}")
+                                    }
+                                }
+                            }
+                        )
+                    } else {
+                        Div({
+                            style {
+                                property("padding", "32px 16px")
+                                property("text-align", "center")
+                                property("color", "#9ca3af")
+                                property("font-size", "14px")
+                            }
+                        }) {
+                            Div { Text("📂") }
+                            Br()
+                            Text("Загрузка дерева файлов...")
+                        }
+                    }
+                }
+            }
         }
 
         // Main Chat Area
         Div({
             classes("chat-area")
+            style {
+                property("flex", "1")
+                property("display", "flex")
+                property("flex-direction", "column")
+            }
         }) {
             ChatHeader(
                 onHistoryClick = {
@@ -383,6 +527,8 @@ fun ClaudeChatApp() {
                     if (showHistoryPanel) {
                         showSettingsPanel = false
                         showReminderPanel = false
+                        showFileTreePanel = false
+                        showTicketsPanel = false
                         scope.launch {
                             loadSessions(sessions, unreadCounts) { s, u ->
                                 sessions = s
@@ -396,20 +542,10 @@ fun ClaudeChatApp() {
                     if (showReminderPanel) {
                         showSettingsPanel = false
                         showHistoryPanel = false
-                        showTicketPanel = false
+                        showFileTreePanel = false
+                        showTicketsPanel = false
                         scope.launch {
                             loadReminders(reminders, notifiedReminders) { reminders = it }
-                        }
-                    }
-                },
-                onTicketsClick = {
-                    showTicketPanel = !showTicketPanel
-                    if (showTicketPanel) {
-                        showSettingsPanel = false
-                        showHistoryPanel = false
-                        showReminderPanel = false
-                        scope.launch {
-                            loadTickets(tickets) { tickets = it }
                         }
                     }
                 },
@@ -419,7 +555,39 @@ fun ClaudeChatApp() {
                         showSettingsPanel = false
                         showHistoryPanel = false
                         showReminderPanel = false
-                        showTicketPanel = false
+                        showTicketsPanel = false
+                        // Загружаем дерево файлов если еще не загружено
+                        if (fileTree == null) {
+                            scope.launch {
+                                loadFileTree { tree, path ->
+                                    fileTree = tree
+                                    projectPath = path
+                                }
+                            }
+                        }
+                    }
+                },
+                onTicketsClick = {
+                    showTicketsPanel = !showTicketsPanel
+                    if (showTicketsPanel) {
+                        showSettingsPanel = false
+                        showHistoryPanel = false
+                        showReminderPanel = false
+                        showFileTreePanel = false
+                        console.log("🎫 Opening tickets panel for session: $currentSessionId")
+                        scope.launch {
+                            try {
+                                console.log("🎫 Loading tickets...")
+                                val response = ApiClient.getTickets(currentSessionId)
+                                tickets = response.tickets
+                                console.log("🎫 Loaded ${tickets.size} tickets")
+                            } catch (e: Exception) {
+                                console.error("❌ Failed to load tickets: ${e.message}")
+                                console.error(e)
+                            }
+                        }
+                    } else {
+                        console.log("🎫 Closing tickets panel")
                     }
                 },
                 onTokensClick = {
@@ -447,6 +615,8 @@ fun ClaudeChatApp() {
                     if (showSettingsPanel) {
                         showHistoryPanel = false
                         showReminderPanel = false
+                        showFileTreePanel = false
+                        showTicketsPanel = false
                         scope.launch {
                             loadTools(tools) { tools = it }
                         }
@@ -473,6 +643,7 @@ fun ClaudeChatApp() {
                             messages = messages,
                             userLocation = userLocation,
                             selectedFiles = selectedFiles,
+                            projectPath = projectPath,
                             onMessagesUpdate = { messages = it },
                             onLoadingChange = { isLoading = it },
                             onInputClear = { inputText = "" },
@@ -494,10 +665,7 @@ fun ClaudeChatApp() {
             settings = settings,
             tools = tools,
             onClose = { showSettingsPanel = false },
-            onSettingsChange = { newSettings ->
-                settings = newSettings
-                Utils.saveSettings(newSettings)
-            },
+            onSettingsChange = { settings = it },
             onClearHistory = {
                 messages = listOf(
                     Message(
@@ -528,7 +696,8 @@ private suspend fun sendMessage(
     settings: Settings,
     messages: List<Message>,
     userLocation: UserLocation?,
-    selectedFiles: List<String>,
+    selectedFiles: Set<String>,
+    projectPath: String?,
     onMessagesUpdate: (List<Message>) -> Unit,
     onLoadingChange: (Boolean) -> Unit,
     onInputClear: () -> Unit,
@@ -577,6 +746,22 @@ private suspend fun sendMessage(
         }
 
         // Send message
+        // Формируем полные пути для выбранных файлов
+        val fullPathFiles = if (projectPath != null && selectedFiles.isNotEmpty()) {
+            selectedFiles.map { relativePath ->
+                "$projectPath/$relativePath"
+            }
+        } else {
+            selectedFiles.toList()
+        }
+
+        if (fullPathFiles.isNotEmpty()) {
+            console.log("📎 Sending ${fullPathFiles.size} selected files with full paths:")
+            fullPathFiles.forEach { path ->
+                console.log("  - $path")
+            }
+        }
+
         val response = ApiClient.sendMessage(
             ChatRequest(
                 message = text,
@@ -593,8 +778,7 @@ private suspend fun sendMessage(
                 rag_top_k = settings.ragTopK,
                 rag_min_similarity = settings.ragMinSimilarity.toDouble(),
                 rag_filter_enabled = settings.ragFilterEnabled,
-                file_context_enabled = settings.fileContextEnabled,
-                selected_files = selectedFiles
+                selected_files = fullPathFiles
             )
         )
 
@@ -623,28 +807,72 @@ private suspend fun sendMessage(
             }
 
             // Handle intermediate messages based on settings
-            if (settings.showAllIntermediateMessages && response.intermediate_messages.isNotEmpty()) {
-                // Режим отладки: показываем все промежуточные сообщения в истории чата
-                response.intermediate_messages.forEach { intermediateMsg ->
-                    updatedMessages = updatedMessages + Message(
-                        role = intermediateMsg.role,
-                        content = "🔄 " + intermediateMsg.content,
-                        timestamp = Date().toISOString(),
-                        is_intermediate = true  // Помечаем как промежуточное
-                    )
-                }
-            }
+            if (response.intermediate_messages.isNotEmpty()) {
+                if (settings.showAllIntermediateMessages) {
+                    // Show all intermediate messages in chat history (marked as intermediate)
+                    response.intermediate_messages.forEach { intermediateMsg ->
+                        updatedMessages = updatedMessages + Message(
+                            role = intermediateMsg.role,
+                            content = "🔄 " + intermediateMsg.content,
+                            timestamp = Date().toISOString(),
+                            is_intermediate = true  // Помечаем как промежуточное
+                        )
+                    }
 
-            // Добавляем финальный ответ в историю (всегда)
-            // Промежуточные сообщения уже показаны через WebSocket streaming (streamingText)
-            updatedMessages = updatedMessages + Message(
-                role = "assistant",
-                content = response.reply,
-                timestamp = Date().toISOString(),
-                usage = response.usage,
-                is_intermediate = false
-            )
-            onMessagesUpdate(updatedMessages)
+                    // Add final response
+                    updatedMessages = updatedMessages + Message(
+                        role = "assistant",
+                        content = response.reply,
+                        timestamp = Date().toISOString(),
+                        usage = response.usage,
+                        is_intermediate = false
+                    )
+                    onMessagesUpdate(updatedMessages)
+                } else {
+                    // Show intermediate messages one by one, replacing each other
+                    // НЕ добавляем их в историю, только показываем временно
+                    coroutineScope {
+                        launch {
+                            response.intermediate_messages.forEachIndexed { index, intermediateMsg ->
+                                // Создаем временное сообщение (не добавляем в updatedMessages)
+                                val tempMessages = updatedMessages + Message(
+                                    role = intermediateMsg.role,
+                                    content = "🔄 " + intermediateMsg.content,
+                                    timestamp = Date().toISOString(),
+                                    is_intermediate = true
+                                )
+                                onMessagesUpdate(tempMessages)
+
+                                // Wait a bit before showing next message (except for the last one)
+                                if (index < response.intermediate_messages.size - 1) {
+                                    delay(800)
+                                }
+                            }
+
+                            // Show final response after last intermediate message
+                            // Очищаем промежуточные сообщения и показываем только финальный ответ
+                            delay(500)
+                            updatedMessages = updatedMessages + Message(
+                                role = "assistant",
+                                content = response.reply,
+                                timestamp = Date().toISOString(),
+                                usage = response.usage,
+                                is_intermediate = false
+                            )
+                            onMessagesUpdate(updatedMessages)
+                        }
+                    }
+                }
+            } else {
+                // No intermediate messages, just add the response
+                updatedMessages = updatedMessages + Message(
+                    role = "assistant",
+                    content = response.reply,
+                    timestamp = Date().toISOString(),
+                    usage = response.usage
+                )
+                onMessagesUpdate(updatedMessages)
+            }
         }
     } catch (e: Exception) {
         console.error("Error sending message: ${e.message}")
@@ -752,15 +980,18 @@ private suspend fun loadReminders(
     }
 }
 
-private suspend fun loadTickets(
-    current: List<SupportTicket>,
-    onUpdate: (List<SupportTicket>) -> Unit
+private suspend fun loadFileTree(
+    onUpdate: (FileTreeNode?, String?) -> Unit
 ) {
     try {
-        val response = ApiClient.getTickets()
-        onUpdate(response.tickets)
+        val response = ApiClient.getFileTree()
+        if (response.error != null) {
+            console.error("Error loading file tree: ${response.error}")
+        } else {
+            onUpdate(response.tree, response.projectPath)
+        }
     } catch (e: Exception) {
-        console.error("Error loading tickets: ${e.message}")
+        console.error("Error loading file tree: ${e.message}")
     }
 }
 

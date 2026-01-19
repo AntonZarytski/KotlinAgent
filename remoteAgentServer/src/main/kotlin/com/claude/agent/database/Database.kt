@@ -4,7 +4,8 @@ import com.claude.agent.config.AppConfig
 import com.claude.agent.database.models.Messages
 import com.claude.agent.database.models.Reminders
 import com.claude.agent.database.models.Sessions
-import com.claude.agent.database.models.Tickets
+import com.claude.agent.database.models.SupportTickets
+import com.claude.agent.database.models.TicketTimeline
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -60,11 +61,11 @@ object DatabaseFactory {
 
         // Создаём таблицы и недостающие колонки если не существуют
         transaction {
-            logger.info("Проверка и создание таблиц: Sessions, Messages, Reminders, Tickets")
+            logger.info("Проверка и создание таблиц: Sessions, Messages, Reminders, SupportTickets, TicketTimeline")
 
             // Проверяем существующие таблицы
             val existingTables = mutableListOf<String>()
-            listOf("sessions", "messages", "reminders", "tickets").forEach { tableName ->
+            listOf("sessions", "messages", "reminders", "support_tickets", "ticket_timeline").forEach { tableName ->
                 try {
                     exec("SELECT 1 FROM $tableName LIMIT 1") { }
                     existingTables.add(tableName)
@@ -75,10 +76,10 @@ object DatabaseFactory {
             }
 
             // Создаём недостающие таблицы и колонки
-            SchemaUtils.createMissingTablesAndColumns(Sessions, Messages, Reminders, Tickets)
+            SchemaUtils.createMissingTablesAndColumns(Sessions, Messages, Reminders, SupportTickets, TicketTimeline)
 
             // Проверяем что все таблицы созданы
-            val tables = listOf("sessions", "messages", "reminders", "tickets")
+            val tables = listOf("sessions", "messages", "reminders", "support_tickets", "ticket_timeline")
             tables.forEach { tableName ->
                 try {
                     exec("SELECT 1 FROM $tableName LIMIT 1") { }

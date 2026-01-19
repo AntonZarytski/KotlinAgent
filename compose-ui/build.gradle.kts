@@ -16,6 +16,7 @@ repositories {
     google()
     maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
 }
+
 kotlin {
     js(IR) {
         browser {
@@ -72,34 +73,32 @@ compose.desktop {
 }
 
 // Генерация файла с версией сборки
-val generateBuildInfo = tasks.register("generateBuildInfo") {
-    // Генерируем в стандартную директорию исходников jsMain
-    val outputDir = file("src/jsMain/kotlin/com/claude/agent/ui")
-    val outputFile = File(outputDir, "BuildInfo.kt")
+val generateBuildInfo by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated/kotlin")
+    val outputFile = outputDir.get().file("BuildInfo.kt")
 
     outputs.file(outputFile)
-    outputs.upToDateWhen { false }
-
-    doFirst {
-        // Создаем директорию перед записью
-        outputDir.mkdirs()
-    }
+    // Всегда выполнять задачу, чтобы обновлять время сборки
+//    outputs.upToDateWhen { false }
 
     doLast {
         val timestamp = LocalDateTime.now()
             .format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss"))
 
-        outputFile.writeText("""
+        outputDir.get().asFile.mkdirs()
+        outputFile.asFile.writeText("""
             package com.claude.agent.ui
 
             object BuildInfo {
                 const val BUILD_TIME = "$timestamp"
             }
         """.trimIndent())
-
-        println("✅ BuildInfo.kt создан с временем: $timestamp")
-        println("   Путь: ${outputFile.absolutePath}")
     }
+}
+
+// Добавляем сгенерированный файл в jsMain sourceSets
+kotlin.sourceSets.named("jsMain") {
+    kotlin.srcDir(layout.buildDirectory.dir("generated/kotlin"))
 }
 
 // Запускаем генерацию перед компиляцией
@@ -107,24 +106,22 @@ tasks.named("compileKotlinJs") {
     dependsOn(generateBuildInfo)
 }
 
-// Отключаем кеширование для критических задач сборки, чтобы BuildInfo всегда обновлялся
-tasks.matching {
-    it.name in listOf(
-        "compileKotlinJs",
-        "compileProductionExecutableKotlinJs",
-        "jsBrowserProductionWebpack",
-        "jsBrowserDistribution"
-    )
-}.configureEach {
-    outputs.upToDateWhen { false }
-}
+// Отключаем кеширование для всех задач сборки, чтобы BuildInfo всегда обновлялся
+//tasks.configureEach {
+//    outputs.upToDateWhen { false }
+//}
 
-// Очищаем только webpack кеш и dist перед production сборкой
-// НЕ очищаем Kotlin/JS кеш, чтобы избежать ошибок компиляции
+// Очищаем webpack кеш и dist перед production сборкой
+// Это гарантирует, что BuildInfo.kt всегда попадёт в финальный bundle
 val cleanWebpackCache by tasks.registering(Delete::class) {
     delete(layout.buildDirectory.dir("kotlin-webpack"))
     delete(layout.buildDirectory.dir("dist"))
-    delete(layout.buildDirectory.dir("compileSync"))
+}
+
+// Очищаем проблемные кеши Kotlin/JS перед компиляцией
+val cleanKotlinJsCache by tasks.registering(Delete::class) {
+    delete(layout.buildDirectory.dir("classes/kotlin/js"))
+    delete(layout.buildDirectory.dir("kotlin"))
 }
 
 tasks.named("jsBrowserProductionWebpack") {
@@ -132,7 +129,12 @@ tasks.named("jsBrowserProductionWebpack") {
 }
 
 tasks.named("jsBrowserDistribution") {
-    dependsOn(cleanWebpackCache)
+    dependsOn(cleanWebpackCache, cleanKotlinJsCache)
+}
+
+// Очищаем кеш перед каждой компиляцией для стабильности
+tasks.named("compileKotlinJs") {
+    dependsOn(cleanKotlinJsCache)
 }
 
 //// Создаём алиас jsBrowserRun для удобства разработки

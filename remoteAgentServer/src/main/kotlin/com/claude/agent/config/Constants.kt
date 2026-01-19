@@ -20,13 +20,6 @@ object ClaudeConfig {
     const val MAX_TOKENS = 1024
 }
 
-// === Настройки File Context ===
-object FileContextConfig {
-    const val MAX_FILE_CONTEXT_TOKENS = 2000  // Лимит на все файлы вместе (~8000 символов)
-    const val MAX_LINES_PER_FILE = 100        // Максимум строк из одного файла
-    const val MAX_CHARS_PER_FILE = 5000       // Максимум символов из одного файла
-}
-
 // === Форматы вывода ===
 object OutputFormat {
     const val DEFAULT = "default"
@@ -63,10 +56,10 @@ object Limits {
 
 // === Настройки сжатия истории ===
 object CompressionConfig {
-    const val THRESHOLD = 4                   // Количество сообщений для сжатия (агрессивнее)
-    const val KEEP_RECENT = 2                 // Сколько последних сохранять без сжатия
-    const val SUMMARY_MAX_TOKENS = 80         // Максимум токенов для summary (сокращено)
-    const val MAX_HISTORY_MESSAGES = 8        // Максимум сообщений в истории (сокращено)
+    const val THRESHOLD = 10                  // Количество сообщений для сжатия
+    const val KEEP_RECENT = 4                 // Сколько последних сохранять без сжатия (увеличено с 2 до 4)
+    const val SUMMARY_MAX_TOKENS = 150        // Максимум токенов для summary
+    const val MAX_HISTORY_MESSAGES = 20       // Максимум сообщений в истории (скользящее окно)
     const val IMPORTANT_MESSAGE_THRESHOLD = 100 // Минимальная длина для "важного" сообщения
 }
 
@@ -88,21 +81,7 @@ object ToolsFilteringConfig {
 // === Настройки оптимизации tool iterations ===
 object ToolIterationConfig {
     const val COMPRESS_HISTORY_IN_ITERATIONS = true  // Сжимать историю в итерациях
-    const val MAX_CONTEXT_MESSAGES = 4        // Сокращено для экономии токенов
-}
-
-// === Настройки фильтрации MCP результатов ===
-object McpResultsConfig {
-    const val MAX_RESULT_LENGTH = 2000        // Максимальная длина результата MCP инструмента
-    const val TRUNCATE_LARGE_RESULTS = true   // Обрезать большие результаты
-    const val SMART_TRUNCATION = true         // Умное обрезание (сохранять начало и конец)
-}
-
-// === Настройки RAG ===
-object RagConfig {
-    const val DEFAULT_TOP_K = 2               // Количество релевантных чанков (было 3)
-    const val DEFAULT_MIN_SIMILARITY = 0.4    // Минимальный порог схожести (было 0.3)
-    const val MAX_TOKENS_PER_CHUNK = 300      // Максимум токенов на чанк (~1200 символов)
+    const val MAX_CONTEXT_MESSAGES = 5        // Увеличено для сохранения контекста задачи
 }
 
 // === Маркер конца результата для spec mode ===

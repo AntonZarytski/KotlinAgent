@@ -3,11 +3,8 @@ package com.claude.agent
 import com.claude.agent.config.AppConfig
 import com.claude.agent.config.PromptCachingConfig
 import com.claude.agent.config.ToolsFilteringConfig
-import com.claude.agent.config.McpResultsConfig
-import com.claude.agent.config.CompressionConfig
 import com.claude.agent.database.ConversationRepository
 import com.claude.agent.database.DatabaseFactory
-import com.claude.agent.database.TicketRepository
 import com.claude.agent.routes.chatRoutes
 import com.claude.agent.routes.fileTreeRoutes
 import com.claude.agent.routes.healthRoutes
@@ -15,20 +12,17 @@ import com.claude.agent.routes.metricsRoutes
 import com.claude.agent.routes.ragRoutes
 import com.claude.agent.routes.reminderRoutes
 import com.claude.agent.routes.sessionRoutes
-import com.claude.agent.routes.supportRoutes
+import com.claude.agent.routes.ticketRoutes
 import com.claude.agent.routes.webSocketRoutes
 import com.claude.agent.service.ReminderService
-import com.claude.agent.service.SupportService
+import com.claude.agent.service.SupportTicketService
 import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.service.GeolocationService
 import com.claude.agent.service.HistoryCompressor
 import com.claude.agent.service.TokenMetricsService
 import com.claude.agent.service.ToolsFilterService
-import com.claude.agent.service.McpResultsFilterService
 import com.claude.agent.llm.mcp.MCPTools
-import com.claude.agent.llm.mcp.Mcp
 import com.claude.agent.llm.mcp.local.ActionPlannerMcp
-import com.claude.agent.llm.mcp.local.ToolChainMcp
 import com.claude.agent.llm.mcp.providers.RemoteMcpProvider
 import com.claude.agent.service.WebSocketService
 import com.claude.agent.llm.mcp.local.ChatSummaryMcp
@@ -39,10 +33,12 @@ import com.claude.agent.llm.mcp.local.WeatherMcp
 import com.claude.agent.llm.mcp.local.AndroidStudioLocalMcp
 import com.claude.agent.llm.mcp.local.GitRepositoryMcp
 import com.claude.agent.llm.mcp.local.HelpMcp
-import com.claude.agent.llm.mcp.local.SupportMcp
+import com.claude.agent.llm.mcp.local.SupportTicketMcp
+import com.claude.agent.llm.mcp.local.GooglePlayPublisherMcp
 import com.claude.agent.llm.mcp.remote.AirTicketsMcp
 import com.claude.agent.routes.prReviewRoutes
 import com.claude.agent.service.GitHubService
+import com.claude.agent.service.GooglePlayService
 import com.claude.agent.service.LocalAgentManager
 import com.claude.agent.service.OllamaEmbeddingClient
 import com.claude.agent.service.RagService
@@ -145,6 +141,7 @@ fun main() {
  * - Содержит: index.html, compose-web.js, styles.css
  *
  * **Development (локальная разработка):**
+ * - `compose-ui/build/kotlin-webpack/js/productionExecutable/` - результат ./gradlew :compose-ui:jsBrowserProductionWebpack (приоритет)
  * - `compose-ui/build/dist/js/productionExecutable/` - результат ./gradlew :compose-ui:jsBrowserDistribution
  * - `compose-ui/build/distributions/` - альтернативная папка сборки
  *
@@ -154,6 +151,17 @@ fun main() {
 private fun resolveComposeWebPath(logger: org.slf4j.Logger): File? {
     val possiblePaths = listOf(
         // ПРИОРИТЕТ 1: Development - свежая сборка из compose-ui/build
+        // Processed resources (содержит index.html и styles.css)
+        File("compose-ui/build/processedResources/js/main"),
+        File(System.getProperty("user.dir"), "compose-ui/build/processedResources/js/main"),
+        File("../compose-ui/build/processedResources/js/main"),
+
+        // Webpack output (jsBrowserProductionWebpack)
+        File("compose-ui/build/kotlin-webpack/js/productionExecutable"),
+        File(System.getProperty("user.dir"), "compose-ui/build/kotlin-webpack/js/productionExecutable"),
+        File("../compose-ui/build/kotlin-webpack/js/productionExecutable"),
+
+        // Старые пути (jsBrowserDistribution)
         File("compose-ui/build/dist/js/productionExecutable"),
         File(System.getProperty("user.dir"), "compose-ui/build/dist/js/productionExecutable"),
         File("../compose-ui/build/dist/js/productionExecutable"),
@@ -343,32 +351,47 @@ fun Application.module() {
     }
 
     val reminderService = ReminderService(repository, webSocketService)
+    val ticketService = SupportTicketService()
+
+    // Google Play Publisher Service
+    val googlePlayService = if (AppConfig.googlePlayServiceAccountPath != null) {
+        try {
+            GooglePlayService(AppConfig.googlePlayServiceAccountPath!!)
+                .also { logger.info("✅ Google Play Publisher service initialized") }
+        } catch (e: Exception) {
+            logger.error("❌ Failed to initialize Google Play service: ${e.message}")
+            null
+        }
+    } else {
+        logger.info("⚠️ Google Play Publisher not configured (GOOGLE_PLAY_SERVICE_ACCOUNT_PATH not set)")
+        null
+    }
 
     val remoteMcpProvider = RemoteMcpProvider(listOf(AirTicketsMcp()))
 
     val reminderMcp = ReminderMcp(reminderService)
+    val supportTicketMcp = SupportTicketMcp(ticketService)
+    val googlePlayPublisherMcp = GooglePlayPublisherMcp(googlePlayService, ticketService)
     val helpMcp = HelpMcp(ragService, ollamaEmbeddingClient)
-    val supportMcp = SupportMcp(dataPath = "support_data")
 
     val localMcpProvider = LocalMcpProvider(
-        listOf<Mcp.Local>(
-            ToolChainMcp(),              // Легковесный планировщик цепочек
-            ActionPlannerMcp(),          // Тяжелый планировщик (выключен по умолчанию)
+        listOf(
+            ActionPlannerMcp(),
             WeatherMcp(httpClient, geolocationService),
             SolarActivityMcp(httpClient, geolocationService),
             ChatSummaryMcp(),
             reminderMcp,
+            supportTicketMcp,
+            googlePlayPublisherMcp,
             AndroidStudioLocalMcp(),
             GitRepositoryMcp(),
-            helpMcp,
-            supportMcp
+            helpMcp
             )
     )
 
     // === Инициализация сервисов оптимизации ===
     val tokenMetricsService = TokenMetricsService()
     val toolsFilterService = ToolsFilterService()
-    val mcpResultsFilterService = McpResultsFilterService()
 
     val mcpTools = MCPTools(localMcpProvider = localMcpProvider, remoteMcpProvider = remoteMcpProvider)
 
@@ -381,7 +404,6 @@ fun Application.module() {
         webSocketService = webSocketService,
         tokenMetricsService = tokenMetricsService,
         toolsFilterService = toolsFilterService,
-        mcpResultsFilterService = mcpResultsFilterService,
         ragService = ragService,
         ollamaEmbeddingClient = ollamaEmbeddingClient
     )
@@ -390,21 +412,8 @@ fun Application.module() {
     reminderService.claudeClient = claudeClient
     reminderService.mcpTools = mcpTools
     reminderMcp.claudeClient = claudeClient
+    googlePlayPublisherMcp.claudeClient = claudeClient
     reminderService.startScheduler()
-
-    // Support Service и TicketRepository
-    val ticketRepository = TicketRepository()
-
-    // Устанавливаем зависимость для SupportMcp
-    supportMcp.ticketRepository = ticketRepository
-
-    val supportService = SupportService(
-        claudeClient = claudeClient,
-        mcpTools = mcpTools,
-        ragService = ragService,
-        ollamaEmbeddingClient = ollamaEmbeddingClient,
-        ticketRepository = ticketRepository
-    )
 
     logger.info("=== Сервисы инициализированы ===")
     logger.info("Порт: ${AppConfig.port}")
@@ -412,9 +421,7 @@ fun Application.module() {
     logger.info("Token optimization: ENABLED")
     logger.info("  - Prompt Caching: ${PromptCachingConfig.ENABLED}")
     logger.info("  - Tools Filtering: ${ToolsFilteringConfig.ENABLED}")
-    logger.info("  - MCP Results Filtering: ${McpResultsConfig.TRUNCATE_LARGE_RESULTS} (max=${McpResultsConfig.MAX_RESULT_LENGTH})")
-    logger.info("  - History Compression: ENABLED (threshold=${CompressionConfig.THRESHOLD}, keep=${CompressionConfig.KEEP_RECENT})")
-    logger.info("  - Tool Chains: ENABLED (ToolChainMcp)")
+    logger.info("  - History Compression: ENABLED")
     logger.info("================================")
 
     // === Конфигурация Ktor ===
@@ -501,17 +508,20 @@ fun Application.module() {
             claudeClient = claudeClient,
             mcpTools = mcpTools,
             historyCompressor = historyCompressor,
-            repository = repository,
-            supportService = supportService,
-            webSocketService = webSocketService,
-            ticketRepository = ticketRepository
+            repository = repository
         )
 
         // Session management
         sessionRoutes(repository)
 
+        // File tree management
+        fileTreeRoutes()
+
         // Reminder management
         reminderRoutes(reminderService)
+
+        // Ticket management
+        ticketRoutes(ticketService)
 
         // RAG endpoints
         ragRoutes(ragService = ragService, ollamaEmbeddingClient = ollamaEmbeddingClient)
@@ -531,12 +541,6 @@ fun Application.module() {
             githubService = githubService
         )
         prReviewRoutes(prReviewService)
-
-        // Support endpoints
-        supportRoutes(supportService, ticketRepository, webSocketService, repository)
-
-        // File tree endpoints
-        fileTreeRoutes(mcpTools, repository)
 
         // Статические файлы (UI) - ДОЛЖНЫ БЫТЬ В КОНЦЕ!
 

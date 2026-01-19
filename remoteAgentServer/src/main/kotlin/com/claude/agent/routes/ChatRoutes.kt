@@ -2,22 +2,20 @@ package com.claude.agent.routes
 
 import com.claude.agent.config.ErrorMessages
 import com.claude.agent.database.ConversationRepository
-import com.claude.agent.database.TicketRepository
 import com.claude.agent.models.*
 import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.llm.SystemPrompts
 import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.service.HistoryCompressor
-import com.claude.agent.service.SupportService
-import com.claude.agent.service.WebSocketService
-import com.claude.agent.service.WebSocketMessage
 import io.ktor.http.*
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.coroutines.launch
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.slf4j.LoggerFactory
 
 /**
@@ -29,10 +27,7 @@ fun Route.chatRoutes(
     claudeClient: ClaudeClient,
     mcpTools: MCPTools,
     historyCompressor: HistoryCompressor,
-    repository: ConversationRepository,
-    supportService: SupportService,
-    webSocketService: WebSocketService,
-    ticketRepository: TicketRepository
+    repository: ConversationRepository
 ) {
     val logger = LoggerFactory.getLogger("ChatRoutes")
 
@@ -158,7 +153,6 @@ $context
                 ragTopK = request.rag_top_k,
                 ragMinSimilarity = request.rag_min_similarity,
                 ragFilterEnabled = request.rag_filter_enabled,
-                fileContextEnabled = request.file_context_enabled,
                 selectedFiles = request.selected_files
             )
 
@@ -178,98 +172,6 @@ $context
                     inputTokens = claudeResponse.usage?.input_tokens,
                     outputTokens = claudeResponse.usage?.output_tokens
                 )
-            }
-
-            // Автоматический анализ проблемы для создания тикета (асинхронно)
-            // НЕ создаем тикет, если Claude уже создал его через MCP
-            if (request.session_id != null && !isHelpCommand && !claudeResponse.ticketCreatedViaMcp) {
-                call.application.launch {
-                    try {
-                        // Проверяем, есть ли уже открытые тикеты в этой сессии
-                        val existingTickets = ticketRepository.getSessionTickets(request.session_id)
-                            .filter { ticket -> ticket.status == TicketStatus.OPEN || ticket.status == TicketStatus.IN_PROGRESS }
-
-                        if (existingTickets.isNotEmpty()) {
-                            logger.info("⚠️ В сессии ${request.session_id} уже есть ${existingTickets.size} открытых тикетов, пропускаем автосоздание")
-                            return@launch
-                        }
-
-                        val analysis = supportService.analyzeProblem(
-                            question = request.message,
-                            sessionId = request.session_id
-                        )
-
-                        if (analysis.needsTicket) {
-                            logger.info("🎫 Обнаружена проблема, требующая тикета: ${analysis.title}")
-                            val ticket = supportService.createTicketFromAnalysis(
-                                analysis = analysis,
-                                sessionId = request.session_id,
-                                originalQuestion = request.message
-                            )
-
-                            if (ticket != null) {
-                                logger.info("✅ Автоматически создан тикет: ${ticket.id} - ${ticket.title}")
-
-                                // Сохраняем системное сообщение в чат
-                                try {
-                                    val priorityEmoji = when (ticket.priority) {
-                                        TicketPriority.LOW -> "🟢"
-                                        TicketPriority.MEDIUM -> "🟡"
-                                        TicketPriority.HIGH -> "🟠"
-                                        TicketPriority.CRITICAL -> "🔴"
-                                    }
-
-                                    val notificationMessage = "🎫 Тикет ${ticket.id} создан автоматически: ${ticket.title} (приоритет: $priorityEmoji ${ticket.priority.name})"
-
-                                    repository.saveMessage(
-                                        sessionId = request.session_id,
-                                        role = "assistant",
-                                        content = notificationMessage,
-                                        inputTokens = null,
-                                        outputTokens = null
-                                    )
-                                } catch (e: Exception) {
-                                    logger.error("Ошибка сохранения сообщения о создании тикета: ${e.message}", e)
-                                }
-
-                                // Отправляем уведомление через WebSocket
-                                try {
-                                    val ticketData = buildJsonObject {
-                                        put("ticket_id", ticket.id)
-                                        put("title", ticket.title)
-                                        put("status", ticket.status.name)
-                                        put("priority", ticket.priority.name)
-                                        put("created_at", ticket.createdAt)
-                                    }
-
-                                    webSocketService.broadcastToSession(
-                                        sessionId = request.session_id,
-                                        message = WebSocketMessage(
-                                            type = "ticket_created",
-                                            sessionId = request.session_id,
-                                            data = ticketData.toString()
-                                        )
-                                    )
-
-                                    // Также отправляем глобально для обновления списка тикетов
-                                    webSocketService.broadcastGlobal(
-                                        message = WebSocketMessage(
-                                            type = "ticket_created",
-                                            sessionId = request.session_id,
-                                            data = ticketData.toString()
-                                        )
-                                    )
-
-                                    logger.info("📡 Уведомление о создании тикета отправлено через WebSocket")
-                                } catch (e: Exception) {
-                                    logger.error("Ошибка отправки уведомления о тикете: ${e.message}", e)
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        logger.error("Ошибка при анализе проблемы: ${e.message}", e)
-                    }
-                }
             }
 
             // Формируем ответ

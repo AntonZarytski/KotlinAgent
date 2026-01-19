@@ -338,7 +338,7 @@ fun SettingsPanel(
                                 property("width", "100%")
                             }
                             onInput { event ->
-                                val value = (event.target as HTMLInputElement).value.toIntOrNull() ?: 2
+                                val value = (event.target as HTMLInputElement).value.toIntOrNull() ?: 3
                                 onSettingsChange(settings.copy(ragTopK = value))
                             }
                         }
@@ -384,7 +384,7 @@ fun SettingsPanel(
                                 property("width", "100%")
                             }
                             onInput { event ->
-                                val value = (event.target as HTMLInputElement).value.toFloatOrNull() ?: 0.4f
+                                val value = (event.target as HTMLInputElement).value.toFloatOrNull() ?: 0.3f
                                 onSettingsChange(settings.copy(ragMinSimilarity = value))
                             }
                         }
@@ -398,41 +398,6 @@ fun SettingsPanel(
                             Text("Порог cosine similarity (выше = строже фильтрация)")
                         }
                     }
-                }
-            }
-
-            // File Context Checkbox
-            Div({ style { property("margin-bottom", "24px") } }) {
-                Label(null, {
-                    style {
-                        property("display", "flex")
-                        property("align-items", "center")
-                        property("gap", "12px")
-                        property("cursor", "pointer")
-                        property("padding", "12px 16px")
-                        property("background", "#fef3c7")
-                        property("border", "2px solid #fbbf24")
-                        property("border-radius", "12px")
-                    }
-                }) {
-                    CheckboxInput {
-                        checked(settings.fileContextEnabled)
-                        onInput { event ->
-                            val checked = (event.target as HTMLInputElement).checked
-                            onSettingsChange(settings.copy(fileContextEnabled = checked))
-                        }
-                    }
-                    Text("📁 Работать с выбранными файлами")
-                }
-                Div({
-                    style {
-                        property("font-size", "12px")
-                        property("color", "#92400e")
-                        property("margin-top", "8px")
-                        property("padding-left", "16px")
-                    }
-                }) {
-                    Text("При включении передавать содержимое выбранных файлов в контекст")
                 }
             }
 
@@ -851,6 +816,280 @@ fun ReminderPanel(
                             onClick { onDismiss(reminder.id) }
                         }) {
                             Text(if (isOverdue) "✓ Отметить выполненным" else "❌ Отменить напоминание")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TicketPanel(
+    tickets: List<Ticket>,
+    onClose: () -> Unit
+) {
+    // Debug logging
+    LaunchedEffect(tickets.size) {
+        console.log("🎫 TicketPanel - tickets count: ${tickets.size}")
+    }
+
+    Div({
+        classes("ticket-panel", "active")
+    }) {
+        // Header
+        Div({
+            style {
+                property("background", "#6366f1")
+                property("color", "white")
+                property("padding", "20px")
+                property("display", "flex")
+                property("justify-content", "space-between")
+                property("align-items", "center")
+            }
+        }) {
+            H2({
+                style { property("margin", "0"); property("font-size", "20px") }
+            }) {
+                Text("🎫 Тикеты задач")
+            }
+            Button({
+                style {
+                    property("background", "transparent")
+                    property("border", "0")
+                    property("color", "white")
+                    property("font-size", "28px")
+                    property("cursor", "pointer")
+                }
+                onClick { onClose() }
+            }) {
+                Text("×")
+            }
+        }
+
+        // Content
+        Div({
+            style {
+                property("flex", "1")
+                property("overflow-y", "auto")
+                property("padding", "16px")
+                property("padding-bottom", "150px")
+                property("scroll-behavior", "smooth")
+            }
+        }) {
+            if (tickets.isEmpty()) {
+                // Empty state
+                Div({
+                    style {
+                        property("padding", "40px 20px")
+                        property("text-align", "center")
+                        property("color", "#9ca3af")
+                    }
+                }) {
+                    Div({
+                        style { property("font-size", "48px"); property("margin-bottom", "16px") }
+                    }) {
+                        Text("🎫")
+                    }
+                    Div { Text("Нет активных тикетов") }
+                }
+            } else {
+                // Group tickets by status
+                val openedTickets = tickets.filter { it.status == "opened" }
+                val inProgressTickets = tickets.filter { it.status == "inProgress" }
+                val finishedTickets = tickets.filter { it.status == "finished" }
+
+                // Show opened tickets
+                if (openedTickets.isNotEmpty()) {
+                    Div({
+                        style {
+                            property("margin-bottom", "24px")
+                        }
+                    }) {
+                        H3({
+                            style {
+                                property("font-size", "14px")
+                                property("font-weight", "700")
+                                property("color", "#6b7280")
+                                property("margin-bottom", "12px")
+                                property("text-transform", "uppercase")
+                                property("letter-spacing", "0.5px")
+                            }
+                        }) {
+                            Text("📋 Открытые (${openedTickets.size})")
+                        }
+                        openedTickets.forEach { ticket ->
+                            TicketItem(ticket, "#dbeafe", "#1e40af")
+                        }
+                    }
+                }
+
+                // Show in progress tickets
+                if (inProgressTickets.isNotEmpty()) {
+                    Div({
+                        style {
+                            property("margin-bottom", "24px")
+                        }
+                    }) {
+                        H3({
+                            style {
+                                property("font-size", "14px")
+                                property("font-weight", "700")
+                                property("color", "#6b7280")
+                                property("margin-bottom", "12px")
+                                property("text-transform", "uppercase")
+                                property("letter-spacing", "0.5px")
+                            }
+                        }) {
+                            Text("⚙️ В работе (${inProgressTickets.size})")
+                        }
+                        inProgressTickets.forEach { ticket ->
+                            TicketItem(ticket, "#fef3c7", "#92400e")
+                        }
+                    }
+                }
+
+                // Show finished tickets
+                if (finishedTickets.isNotEmpty()) {
+                    Div({
+                        style {
+                            property("margin-bottom", "24px")
+                        }
+                    }) {
+                        H3({
+                            style {
+                                property("font-size", "14px")
+                                property("font-weight", "700")
+                                property("color", "#6b7280")
+                                property("margin-bottom", "12px")
+                                property("text-transform", "uppercase")
+                                property("letter-spacing", "0.5px")
+                            }
+                        }) {
+                            Text("✅ Завершенные (${finishedTickets.size})")
+                        }
+                        finishedTickets.forEach { ticket ->
+                            TicketItem(ticket, "#d1fae5", "#065f46")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TicketItem(ticket: Ticket, backgroundColor: String, textColor: String) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Div({
+        style {
+            property("padding", "16px")
+            property("background", backgroundColor)
+            property("border", "2px solid ${backgroundColor}")
+            property("border-radius", "12px")
+            property("margin-bottom", "12px")
+            property("cursor", "pointer")
+        }
+        onClick { expanded = !expanded }
+    }) {
+        // Ticket title
+        Div({
+            style {
+                property("font-size", "16px")
+                property("font-weight", "700")
+                property("color", textColor)
+                property("margin-bottom", "8px")
+                property("display", "flex")
+                property("align-items", "center")
+                property("gap", "8px")
+            }
+        }) {
+            Text(if (expanded) "▼" else "▶")
+            Text(ticket.title)
+        }
+
+        // Ticket description
+        Div({
+            style {
+                property("font-size", "14px")
+                property("color", "#374151")
+                property("margin-bottom", "12px")
+                property("line-height", "1.5")
+            }
+        }) {
+            Text(ticket.description)
+        }
+
+        // Ticket metadata
+        Div({
+            style {
+                property("display", "flex")
+                property("gap", "16px")
+                property("font-size", "12px")
+                property("color", "#6b7280")
+                property("margin-bottom", if (expanded) "16px" else "0")
+            }
+        }) {
+            Div {
+                Text("📅 Создан: ${Utils.formatTimestamp(ticket.createdAt)}")
+            }
+            Div {
+                Text("🔄 Обновлен: ${Utils.formatTimestamp(ticket.updatedAt)}")
+            }
+            if (ticket.finishedAt != null) {
+                Div {
+                    Text("✅ Завершен: ${Utils.formatTimestamp(ticket.finishedAt)}")
+                }
+            }
+        }
+
+        // Timeline (expandable)
+        if (expanded && ticket.timeline.isNotEmpty()) {
+            Div({
+                style {
+                    property("margin-top", "16px")
+                    property("padding-top", "16px")
+                    property("border-top", "2px solid rgba(0,0,0,0.1)")
+                }
+            }) {
+                H4({
+                    style {
+                        property("font-size", "13px")
+                        property("font-weight", "700")
+                        property("color", textColor)
+                        property("margin-bottom", "12px")
+                    }
+                }) {
+                    Text("📝 История изменений")
+                }
+
+                ticket.timeline.forEach { entry ->
+                    Div({
+                        style {
+                            property("padding", "8px 12px")
+                            property("background", "rgba(255, 255, 255, 0.5)")
+                            property("border-radius", "8px")
+                            property("margin-bottom", "8px")
+                        }
+                    }) {
+                        Div({
+                            style {
+                                property("font-size", "11px")
+                                property("color", "#6b7280")
+                                property("margin-bottom", "4px")
+                            }
+                        }) {
+                            Text("⏰ ${Utils.formatTimestamp(entry.timestamp)}")
+                        }
+                        Div({
+                            style {
+                                property("font-size", "13px")
+                                property("color", "#374151")
+                                property("line-height", "1.4")
+                            }
+                        }) {
+                            Text(entry.entry)
                         }
                     }
                 }

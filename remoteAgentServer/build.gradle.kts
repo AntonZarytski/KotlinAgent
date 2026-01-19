@@ -30,6 +30,9 @@ dependencies {
 
     // Configuration (.env)
     implementation(libs.dotenv)
+
+    // Google Play Publisher API
+    implementation(libs.bundles.googlePlay)
 }
 
 application {
@@ -47,46 +50,36 @@ tasks.jar {
     from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
 }
 
-// Задача для пересборки UI - ВСЕГДА выполняется, без кеширования
-val buildUI by tasks.registering {
-    group = "build"
-    description = "Пересобирает Compose UI (всегда, без кеша)"
+// Копировать webpack output в processedResources (чтобы все файлы были в одной папке)
+val copyWebpackOutput = tasks.register<Copy>("copyWebpackOutput") {
+    dependsOn(":compose-ui:jsBrowserProductionWebpack")
 
-    // ВСЕГДА выполнять, НИКОГДА не кешировать
-    outputs.upToDateWhen { false }
-
-    dependsOn(":compose-ui:jsBrowserDistribution")
-
-    doFirst {
-        println("🔨 Пересборка Compose UI...")
+    from("../compose-ui/build/kotlin-webpack/js/productionExecutable") {
+        include("*.js", "*.js.map")
     }
-
-    doLast {
-        println("✅ Compose UI пересобран")
-    }
+    into("../compose-ui/build/processedResources/js/main")
 }
 
-// UI должен пересобираться ВСЕГДА при любой сборке сервера
-tasks.named("processResources") {
-    dependsOn(buildUI)
-}
-
-// Для задачи run
+// Собирать Compose UI перед запуском сервера (без кеша для dev)
 tasks.named("run") {
-    dependsOn(buildUI)
+    dependsOn(copyWebpackOutput)
 }
 
-// Для installDist
-tasks.named("installDist") {
-    dependsOn(buildUI)
+// Собирать UI при сборке проекта (build, assemble)
+tasks.named("processResources") {
+    dependsOn(copyWebpackOutput)
 }
 
-// Для jar
-tasks.named("jar") {
-    dependsOn(buildUI)
-}
-
-// Для classes (IntelliJ IDEA)
+// ВАЖНО: Собирать UI даже при запуске из IntelliJ IDEA
 tasks.named("classes") {
-    dependsOn(buildUI)
+    dependsOn(copyWebpackOutput)
+}
+
+// Отключить кеширование для compose-ui задач при разработке
+gradle.taskGraph.whenReady {
+    allTasks
+        .filter { it.project.name == "compose-ui" }
+        .forEach {
+            it.outputs.upToDateWhen { false }
+        }
 }

@@ -13,12 +13,7 @@ class LocalMcpProvider(private val mcps: List<Mcp.Local>) {
     }
 
     fun getToolsDefinitions(enabledTools: List<String>): List<LocalToolDefinition> {
-        // Если enabledTools пустой - возвращаем все tools, иначе фильтруем
-        return if (enabledTools.isEmpty()) {
-            tools.map { it.value }
-        } else {
-            tools.map { it.value }.filter { it.name in enabledTools }
-        }
+        return tools.map { it.value }.filter { it.name in enabledTools }
     }
 
     fun getAllTools(): List<LocalToolDefinition> {

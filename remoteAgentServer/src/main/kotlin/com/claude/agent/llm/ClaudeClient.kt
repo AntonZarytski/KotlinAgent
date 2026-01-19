@@ -14,7 +14,6 @@ import com.claude.agent.service.WebSocketService
 import com.claude.agent.service.WebSocketMessage
 import com.claude.agent.service.TokenMetricsService
 import com.claude.agent.service.ToolsFilterService
-import com.claude.agent.service.McpResultsFilterService
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
@@ -33,18 +32,7 @@ data class ClaudeResponse(
     val reply: String?,
     val usage: TokenUsage?,
     val error: String?,
-    val intermediateMessages: List<Message> = emptyList(),
-    val ticketCreatedViaMcp: Boolean = false  // Флаг, что тикет был создан через MCP
-)
-
-/**
- * Внутренний результат обработки ответа от Claude API
- */
-private data class HandleResponseResult(
-    val reply: String,
-    val usage: TokenUsage,
-    val intermediateMessages: List<Message>,
-    val ticketCreatedViaMcp: Boolean = false
+    val intermediateMessages: List<Message> = emptyList()
 )
 
 /**
@@ -62,7 +50,6 @@ class ClaudeClient(
     private val webSocketService: WebSocketService,
     private val tokenMetricsService: TokenMetricsService? = null,
     private val toolsFilterService: ToolsFilterService? = null,
-    private val mcpResultsFilterService: McpResultsFilterService? = null,
     private val ragService: com.claude.agent.service.RagService? = null,
     private val ollamaEmbeddingClient: com.claude.agent.service.OllamaEmbeddingClient? = null
 ) {
@@ -72,7 +59,7 @@ class ClaudeClient(
 
     companion object {
         private const val MAX_TOOL_ITERATIONS = 20  // Увеличено для сложных задач
-        private const val LOOP_DETECTION_THRESHOLD = 7  // Порог для детекции зацикливания
+        private const val LOOP_DETECTION_THRESHOLD = 3  // Порог для детекции зацикливания
 
         // Thread-local storage for accumulated tool results during a conversation turn
         private val accumulatedToolResults = ThreadLocal<MutableMap<String, String>>()
@@ -112,7 +99,6 @@ class ClaudeClient(
         ragTopK: Int = 3,
         ragMinSimilarity: Double = 0.3,
         ragFilterEnabled: Boolean = true,
-        fileContextEnabled: Boolean = false,
         selectedFiles: List<String> = emptyList()
     ): ClaudeResponse {
         try {
@@ -135,27 +121,15 @@ class ClaudeClient(
                 null
             }
 
-            // Получаем контекст выбранных файлов если включен
-            logger.info("File context enabled: $fileContextEnabled")
-            logger.info("Selected files: ${selectedFiles.size}")
-
-            val fileContext = if (fileContextEnabled && selectedFiles.isNotEmpty()) {
-                retrieveFileContext(
-                    filePaths = selectedFiles,
-                    sessionId = sessionId
-                )
+            // Получаем контекст выбранных файлов
+            val fileContext = if (selectedFiles.isNotEmpty()) {
+                retrieveFileContext(selectedFiles, sessionId)
             } else {
                 null
             }
 
             // Формируем системный промпт
-            val systemPrompt = SystemPrompts.getSystemPrompt(
-                outputFormat = outputFormat,
-                specMode = specMode,
-                enabledTools = enabledTools,
-                isRagEnabled = isRagEnabled,
-                fileContext = fileContext
-            )
+            val systemPrompt = SystemPrompts.getSystemPrompt(outputFormat = outputFormat, specMode = specMode, enabledTools = enabledTools, isRagEnabled = isRagEnabled)
 
             val cleanUserMessage = SystemPrompts.getUserMessage(userMessage)
 
@@ -163,7 +137,8 @@ class ClaudeClient(
             val messages = buildMessages(
                 history = conversationHistory,
                 userMessage = cleanUserMessage,
-                ragContext = ragContext
+                ragContext = ragContext,
+                fileContext = fileContext
             )
 
             mcpTools.enableServers(enabledTools)
@@ -243,7 +218,7 @@ class ClaudeClient(
             }
 
             // Обрабатываем ответ (с поддержкой tool_use)
-            val handleResult = handleResponse(
+            val (finalReply, totalUsage, intermediateMessages) = handleResponse(
                 responseBody = responseBody,
                 initialMessages = messages,
                 model = model,
@@ -259,21 +234,22 @@ class ClaudeClient(
             )
 
             logger.info("Ответ получен за ${elapsed}ms")
-            logger.info("Использовано токенов: input=${handleResult.usage.input_tokens}, output=${handleResult.usage.output_tokens}")
+            logger.info("Использовано токенов: input=${totalUsage?.input_tokens}, output=${totalUsage?.output_tokens}")
 
             // Записываем метрики
-            tokenMetricsService?.recordTokenUsage(
-                sessionId = sessionId,
-                usage = handleResult.usage,
-                cachedTokens = cacheReadTokens
-            )
+            if (totalUsage != null) {
+                tokenMetricsService?.recordTokenUsage(
+                    sessionId = sessionId,
+                    usage = totalUsage,
+                    cachedTokens = cacheReadTokens
+                )
+            }
 
             return ClaudeResponse(
-                reply = handleResult.reply,
-                usage = handleResult.usage,
+                reply = finalReply,
+                usage = totalUsage,
                 error = null,
-                intermediateMessages = handleResult.intermediateMessages,
-                ticketCreatedViaMcp = handleResult.ticketCreatedViaMcp
+                intermediateMessages = intermediateMessages
             )
 
         } catch (e: Exception) {
@@ -303,14 +279,13 @@ class ClaudeClient(
         userLocation: com.claude.agent.models.UserLocation?,
         sessionId: String?,
         collectIntermediateMessages: Boolean = true
-    ): HandleResponseResult {
+    ): Triple<String, TokenUsage, List<Message>> {
         var currentResponse = responseBody
         val messages = initialMessages.toMutableList()
         var totalInputTokens = currentResponse["usage"]?.jsonObject?.get("input_tokens")?.jsonPrimitive?.int ?: 0
         var totalOutputTokens = currentResponse["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.int ?: 0
 
         val intermediateMessages = mutableListOf<Message>()
-        var ticketCreatedViaMcp = false  // Флаг создания тикета через MCP
         var iteration = 0
 
         // Детекция зацикливания: отслеживаем последние вызовы инструментов
@@ -343,52 +318,14 @@ class ClaudeClient(
                 // Clean up thread-local storage
                 accumulatedToolResults.remove()
 
-                // Если финальный текст пустой, запрашиваем у Claude явный ответ
+                // Если финальный текст пустой, это означает, что Claude не вернул текстовый ответ
+                // после выполнения всех инструментов. Возвращаем сообщение по умолчанию.
                 if (finalText.isBlank()) {
-                    logger.warn("⚠️ Claude returned empty text after tool execution. Requesting explicit response...")
-
-                    // Добавляем явный запрос на ответ
-                    messages.add(JsonObject(mapOf(
-                        "role" to JsonPrimitive("user"),
-                        "content" to JsonPrimitive("Пожалуйста, предоставь краткий ответ на основе результатов выполненных действий.")
-                    )))
-
-                    // Делаем еще один запрос
-                    val requestBody = buildAnthropicRequest(
-                        model = model,
-                        maxTokens = maxTokens,
-                        systemPrompt = systemPrompt,
-                        messages = messages,
-                        temperature = temperature,
-                        tools = tools,
-                        remoteMcp = remoteMcp,
-                        specMode = false
-                    )
-
-                    val response: HttpResponse = httpClient.post(apiUrl) {
-                        header("x-api-key", apiKey)
-                        header("anthropic-version", "2023-06-01")
-                        if (remoteMcp.isNotEmpty()) {
-                            header("anthropic-beta", "mcp-client-2025-11-20")
-                        }
-                        contentType(ContentType.Application.Json)
-                        setBody(requestBody)
-                    }
-
-                    currentResponse = response.body<JsonObject>()
-                    totalInputTokens += currentResponse["usage"]?.jsonObject?.get("input_tokens")?.jsonPrimitive?.int ?: 0
-                    totalOutputTokens += currentResponse["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.int ?: 0
-
-                    // Продолжаем обработку с новым ответом
-                    continue
+                    logger.warn("Claude returned empty text response after tool execution. Iteration: $iteration")
+                    return Triple("✅ Задача выполнена", usage, intermediateMessages)
                 }
 
-                return HandleResponseResult(
-                    reply = finalText,
-                    usage = usage,
-                    intermediateMessages = intermediateMessages,
-                    ticketCreatedViaMcp = ticketCreatedViaMcp
-                )
+                return Triple(finalText, usage, intermediateMessages)
             }
 
             // Есть tool_use - обрабатываем
@@ -477,38 +414,35 @@ class ClaudeClient(
 
                     logger.info("Tool call iteration $iteration - Calling: $toolName")
 
-                    val rawResult = try {
+                    val result = try {
                         mcpTools.callLocalTool(toolName, toolInput, clientIp, userLocation, sessionId)
                     } catch (e: Exception) {
                         logger.error("Ошибка выполнения $toolName: ${e.message}")
                         """{"error": "${e.message}"}"""
                     }
 
-                    // Фильтруем результат перед передачей агенту
-                    val result = if (mcpResultsFilterService != null && mcpResultsFilterService.shouldFilter(toolName)) {
-                        val originalLength = rawResult.length
-                        val filtered = mcpResultsFilterService.filterResult(toolName, rawResult)
+                    logger.info("Tool result for $toolName: $result")
 
-                        if (filtered.length < originalLength) {
-                            val savedTokens = mcpResultsFilterService.estimateTokensSaved(originalLength, filtered.length)
-                            tokenMetricsService?.recordMcpFilteringSavings(savedTokens)
-                            logger.info("💰 MCP result filtered: $toolName saved ~$savedTokens tokens")
-                        }
+                    // 🆕 Применяем фильтрацию MCP результатов (summary mode)
+                    val action = toolInput["action"]?.jsonPrimitive?.contentOrNull
+                    val filteredResult = com.claude.agent.service.McpResultsFilterService.filterMcpResult(
+                        toolName = toolName,
+                        action = action,
+                        result = result
+                    )
 
-                        filtered
-                    } else {
-                        rawResult
+                    if (filteredResult.useSummary) {
+                        logger.info("📊 Using summary for agent: $toolName (action=$action)")
+                        logger.debug("Summary: ${filteredResult.summaryResult.take(200)}")
                     }
 
-                    logger.info("Tool result for $toolName: ${result.take(200)}${if (result.length > 200) "..." else ""}")
-
-                    // 🔥 НОВОЕ: Отправляем RAW результат инструмента через WebSocket
+                    // 🔥 НОВОЕ: Отправляем ПОЛНЫЙ результат инструмента через WebSocket в UI
                     if (sessionId != null) {
                         try {
                             val toolResultData = buildJsonObject {
                                 put("tool_name", toolName)
                                 put("tool_input", toolInput)
-                                put("tool_result", rawResult)  // Отправляем полный результат в UI
+                                put("tool_result", filteredResult.fullResult)  // Полный результат для UI
                                 put("iteration", iteration)
                                 put("tool_index", toolCallIndex)
                                 put("timestamp", System.currentTimeMillis())
@@ -522,118 +456,34 @@ class ClaudeClient(
                                     data = Json.encodeToString(toolResultData)
                                 )
                             )
-                            logger.info("📡 Raw tool result отправлен через WebSocket: $toolName")
-
-                            // Специальная обработка для support_crm tool
-                            if (toolName == "support_crm" && sessionId != null) {
-                                try {
-                                    val resultJson = Json.parseToJsonElement(rawResult).jsonObject
-                                    val action = toolInput["action"]?.jsonPrimitive?.content
-
-                                    // Обработка создания тикета
-                                    if (action == "create_ticket" && resultJson["success"]?.jsonPrimitive?.boolean == true) {
-                                        val ticket = resultJson["ticket"]?.jsonObject
-                                        if (ticket != null) {
-                                            val ticketId = ticket["id"]?.jsonPrimitive?.content ?: "unknown"
-                                            val title = ticket["title"]?.jsonPrimitive?.content ?: "Без названия"
-                                            val priority = ticket["priority"]?.jsonPrimitive?.content ?: "MEDIUM"
-
-                                            logger.info("🎫 Тикет создан через MCP: $ticketId - $title")
-                                            ticketCreatedViaMcp = true  // Устанавливаем флаг
-
-                                            // Отправляем уведомление о создании тикета
-                                            val ticketData = buildJsonObject {
-                                                put("ticket_id", ticketId)
-                                                put("title", title)
-                                                put("priority", priority)
-                                                put("created_via_mcp", true)
-                                            }
-
-                                            webSocketService.broadcastToSession(
-                                                sessionId = sessionId,
-                                                message = WebSocketMessage(
-                                                    type = "ticket_created",
-                                                    sessionId = sessionId,
-                                                    data = Json.encodeToString(ticketData)
-                                                )
-                                            )
-
-                                            webSocketService.broadcastGlobal(
-                                                message = WebSocketMessage(
-                                                    type = "ticket_created",
-                                                    sessionId = sessionId,
-                                                    data = Json.encodeToString(ticketData)
-                                                )
-                                            )
-                                        }
-                                    }
-
-                                    // Обработка обновления тикета
-                                    if ((action == "update_ticket" || action == "update_ticket_status") &&
-                                        resultJson["success"]?.jsonPrimitive?.boolean == true) {
-                                        val ticketId = toolInput["ticket_id"]?.jsonPrimitive?.content ?: "unknown"
-                                        val oldStatus = resultJson["old_status"]?.jsonPrimitive?.content
-                                        val newStatus = resultJson["new_status"]?.jsonPrimitive?.content
-                                        val wasDeleted = resultJson["deleted"]?.jsonPrimitive?.boolean ?: false
-
-                                        logger.info("🎫 Тикет обновлен через MCP: $ticketId ($oldStatus -> $newStatus)")
-
-                                        val ticketData = buildJsonObject {
-                                            put("ticket_id", ticketId)
-                                            if (oldStatus != null) put("old_status", oldStatus)
-                                            if (newStatus != null) put("new_status", newStatus)
-                                            put("was_deleted", wasDeleted)
-                                            put("updated_via_mcp", true)
-                                        }
-
-                                        webSocketService.broadcastToSession(
-                                            sessionId = sessionId,
-                                            message = WebSocketMessage(
-                                                type = "ticket_status_changed",
-                                                sessionId = sessionId,
-                                                data = Json.encodeToString(ticketData)
-                                            )
-                                        )
-                                    }
-
-                                    // Обработка удаления тикета
-                                    if (action == "delete_ticket" && resultJson["success"]?.jsonPrimitive?.boolean == true) {
-                                        val ticketId = resultJson["ticket_id"]?.jsonPrimitive?.content ?: "unknown"
-
-                                        logger.info("🎫 Тикет удален через MCP: $ticketId")
-
-                                        val ticketData = buildJsonObject {
-                                            put("ticket_id", ticketId)
-                                            put("deleted_via_mcp", true)
-                                        }
-
-                                        webSocketService.broadcastToSession(
-                                            sessionId = sessionId,
-                                            message = WebSocketMessage(
-                                                type = "ticket_deleted",
-                                                sessionId = sessionId,
-                                                data = Json.encodeToString(ticketData)
-                                            )
-                                        )
-                                    }
-                                } catch (e: Exception) {
-                                    logger.warn("Ошибка обработки support_crm результата: ${e.message}")
-                                }
-                            }
+                            logger.info("📡 Full tool result отправлен через WebSocket: $toolName")
                         } catch (e: Exception) {
                             logger.warn("Не удалось отправить tool result через WebSocket: ${e.message}")
                         }
                     }
 
                     // Store result in accumulated map (except for reminder tool itself)
+                    // Для accumulated map используем summary, если доступен
                     if (toolName != REMINDER) {
-                        toolResultsMap[toolName] = result
+                        val resultForStorage = if (filteredResult.useSummary) {
+                            filteredResult.summaryResult
+                        } else {
+                            filteredResult.fullResult
+                        }
+                        toolResultsMap[toolName] = resultForStorage
+                    }
+
+                    // 🆕 Для агента отправляем SUMMARY результат (если доступен)
+                    val resultForAgent = if (filteredResult.useSummary) {
+                        filteredResult.summaryResult
+                    } else {
+                        filteredResult.fullResult
                     }
 
                     toolResults.add(JsonObject(mapOf(
                         "type" to JsonPrimitive("tool_result"),
                         "tool_use_id" to JsonPrimitive(toolUseId),
-                        "content" to JsonPrimitive(result)
+                        "content" to JsonPrimitive(resultForAgent)
                     )))
                 }
             }
@@ -708,26 +558,20 @@ class ClaudeClient(
         // Если после лимита итераций текст пустой, возвращаем сообщение по умолчанию
         if (finalText.isBlank()) {
             logger.warn("Claude не вернул текстовый ответ после достижения лимита итераций")
-            return HandleResponseResult(
-                reply = "⚠️ Достигнут лимит итераций ($MAX_TOOL_ITERATIONS). " +
+            return Triple(
+                "⚠️ Достигнут лимит итераций ($MAX_TOOL_ITERATIONS). " +
                 "Выполнено инструментов: ${recentToolCalls.size}. " +
                 "Возможно, задача не завершена полностью. " +
                 "Попробуйте переформулировать запрос или разбить на более мелкие задачи.",
-                usage = usage,
-                intermediateMessages = intermediateMessages,
-                ticketCreatedViaMcp = ticketCreatedViaMcp
+                usage,
+                intermediateMessages
             )
         }
 
-        return HandleResponseResult(
-            reply = finalText,
-            usage = usage,
-            intermediateMessages = intermediateMessages,
-            ticketCreatedViaMcp = ticketCreatedViaMcp
-        )
+        return Triple(finalText, usage, intermediateMessages)
     }
 
-    private fun buildMessages(history: List<Message>, userMessage: String, ragContext: String?): List<JsonObject> {
+    private fun buildMessages(history: List<Message>, userMessage: String, ragContext: String?, fileContext: String? = null): List<JsonObject> {
         val messages = mutableListOf<JsonObject>()
 
         // Добавляем историю
@@ -740,31 +584,49 @@ class ClaudeClient(
             }
         }
 
-        // Добавляем текущее сообщение с RAG контекстом (если есть)
-        if (ragContext != null && ragContext.isNotBlank()) {
-            logger.info("✅ Adding RAG context as separate content block with caching (${ragContext.length} chars)")
+        // Добавляем текущее сообщение с контекстом (RAG и/или файлы)
+        val hasRagContext = ragContext != null && ragContext.isNotBlank()
+        val hasFileContext = fileContext != null && fileContext.isNotBlank()
 
-            // Используем content blocks: RAG контекст + вопрос пользователя
+        if (hasRagContext || hasFileContext) {
+            val contentBlocks = mutableListOf<JsonObject>()
+
+            // Блок 1: RAG контекст с кешированием (если есть)
+            if (hasRagContext) {
+                logger.info("✅ Adding RAG context as separate content block with caching (${ragContext!!.length} chars)")
+                contentBlocks.add(JsonObject(mapOf(
+                    "type" to JsonPrimitive("text"),
+                    "text" to JsonPrimitive(ragContext),
+                    "cache_control" to JsonObject(mapOf(
+                        "type" to JsonPrimitive("ephemeral")
+                    ))
+                )))
+            }
+
+            // Блок 2: Контекст файлов с кешированием (если есть)
+            if (hasFileContext) {
+                logger.info("✅ Adding file context as separate content block with caching (${fileContext!!.length} chars)")
+                contentBlocks.add(JsonObject(mapOf(
+                    "type" to JsonPrimitive("text"),
+                    "text" to JsonPrimitive(fileContext),
+                    "cache_control" to JsonObject(mapOf(
+                        "type" to JsonPrimitive("ephemeral")
+                    ))
+                )))
+            }
+
+            // Блок 3: Вопрос пользователя
+            contentBlocks.add(JsonObject(mapOf(
+                "type" to JsonPrimitive("text"),
+                "text" to JsonPrimitive(userMessage)
+            )))
+
             messages.add(JsonObject(mapOf(
                 "role" to JsonPrimitive("user"),
-                "content" to JsonArray(listOf(
-                    // Блок 1: RAG контекст с кешированием
-                    JsonObject(mapOf(
-                        "type" to JsonPrimitive("text"),
-                        "text" to JsonPrimitive(ragContext),
-                        "cache_control" to JsonObject(mapOf(
-                            "type" to JsonPrimitive("ephemeral")
-                        ))
-                    )),
-                    // Блок 2: Вопрос пользователя
-                    JsonObject(mapOf(
-                        "type" to JsonPrimitive("text"),
-                        "text" to JsonPrimitive(userMessage)
-                    ))
-                ))
+                "content" to JsonArray(contentBlocks)
             )))
         } else {
-            // Без RAG - обычное сообщение
+            // Без контекста - обычное сообщение
             messages.add(JsonObject(mapOf(
                 "role" to JsonPrimitive("user"),
                 "content" to JsonPrimitive(userMessage)
@@ -779,15 +641,10 @@ class ClaudeClient(
         remoteMcp: JsonArray,
         userMessage: String = ""
     ): JsonArray? {
-        // ОПТИМИЗАЦИЯ: Если enabledTools пустой - НЕ отправляем tools вообще
-        if (enabledTools.isEmpty() && remoteMcp.isEmpty()) {
-            return null
-        }
-
         val allTools = mcpTools.getLocalToolsDefinitions(enabledTools)
 
         // Применяем динамическую фильтрацию если доступна
-        val filtered = if (toolsFilterService != null && userMessage.isNotBlank() && enabledTools.isNotEmpty()) {
+        val filtered = if (toolsFilterService != null && userMessage.isNotBlank()) {
             val originalCount = allTools.filter { it.name in enabledTools }.size
             val filteredTools = toolsFilterService.filterRelevantTools(userMessage, enabledTools, allTools)
 
@@ -799,7 +656,6 @@ class ClaudeClient(
 
             filteredTools
         } else {
-            // Фильтруем только включенные tools
             allTools.filter { it.name in enabledTools }
         }
 
@@ -887,6 +743,110 @@ class ClaudeClient(
     fun isApiKeyConfigured(): Boolean = apiKey.isNotBlank()
 
     /**
+     * Чтение выбранных файлов через android_studio MCP
+     *
+     * @param selectedFiles Список путей к файлам (относительно корня проекта)
+     * @param sessionId ID сессии для получения пути к проекту
+     * @return Отформатированный контекст с содержимым файлов
+     */
+    private suspend fun retrieveFileContext(
+        selectedFiles: List<String>,
+        sessionId: String?
+    ): String? {
+        if (selectedFiles.isEmpty()) {
+            return null
+        }
+
+        return try {
+            logger.info("📂 Processing ${selectedFiles.size} selected files...")
+
+            val fileContents = mutableListOf<String>()
+
+            // Расширения бинарных файлов, для которых не нужно читать содержимое
+            val binaryExtensions = setOf(
+                "aab", "apk", "jar", "aar", "so", "a", "o",
+                "zip", "tar", "gz", "7z", "rar",
+                "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico",
+                "mp3", "mp4", "avi", "mov", "wav", "flac",
+                "pdf", "doc", "docx", "xls", "xlsx",
+                "class", "dex", "bin", "exe", "dll"
+            )
+
+            for (filePath in selectedFiles) {
+                try {
+                    val fileName = filePath.substringAfterLast('/')
+                    val extension = fileName.substringAfterLast('.', "").lowercase()
+                    val hasExtension = fileName.contains('.')
+                    val isBinary = extension in binaryExtensions
+
+                    // Если нет расширения - скорее всего это папка
+                    if (!hasExtension) {
+                        fileContents.add("""
+                            |Directory: $filePath
+                            |Type: Directory
+                            |Note: This is a directory path. The full path is available for use with tools.
+                        """.trimMargin())
+                        logger.info("📁 Directory: $filePath")
+                    } else if (isBinary) {
+                        // Для бинарных файлов просто указываем путь
+                        fileContents.add("""
+                            |File: $filePath
+                            |Type: Binary file (.$extension)
+                            |Note: This is a binary file. The full path is available for use with tools.
+                        """.trimMargin())
+                        logger.info("📦 Binary file: $filePath (.$extension)")
+                    } else {
+                        // Для текстовых файлов читаем содержимое
+                        val result = mcpTools.callLocalTool(
+                            toolName = "android_studio",
+                            arguments = buildJsonObject {
+                                put("action", "read_file")
+                                put("file_path", filePath)
+                            },
+                            clientIp = null,
+                            userLocation = null,
+                            sessionId = sessionId
+                        )
+
+                        val resultJson = Json.parseToJsonElement(result).jsonObject
+                        val content = resultJson["content"]?.jsonPrimitive?.content
+
+                        if (content != null) {
+                            fileContents.add("""
+                                |File: $filePath
+                                |```
+                                |$content
+                                |```
+                            """.trimMargin())
+                            logger.info("✅ Read text file: $filePath (${content.length} chars)")
+                        } else {
+                            logger.warn("⚠️ Failed to read file: $filePath")
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.error("❌ Error processing file $filePath: ${e.message}")
+                }
+            }
+
+            if (fileContents.isEmpty()) {
+                return null
+            }
+
+            """
+            |<selected_files>
+            |The user has selected the following files for context:
+            |
+            |${fileContents.joinToString("\n\n")}
+            |</selected_files>
+            """.trimMargin()
+
+        } catch (e: Exception) {
+            logger.error("Failed to retrieve file context: ${e.message}", e)
+            null
+        }
+    }
+
+    /**
      * Получение релевантного контекста из RAG базы данных
      *
      * @param query Запрос пользователя
@@ -940,115 +900,6 @@ class ClaudeClient(
 
         } catch (e: Exception) {
             logger.error("Failed to retrieve RAG context: ${e.message}", e)
-            null
-        }
-    }
-
-    /**
-     * Получает содержимое выбранных файлов через android_studio_mcp
-     * С ограничениями на размер для экономии токенов
-     */
-    private suspend fun retrieveFileContext(
-        filePaths: List<String>,
-        sessionId: String?
-    ): String? {
-        return try {
-            if (filePaths.isEmpty()) {
-                logger.warn("No files selected for context")
-                return null
-            }
-
-            logger.info("📂 Retrieving file context for ${filePaths.size} files")
-
-            var totalChars = 0
-            val maxTotalChars = com.claude.agent.config.FileContextConfig.MAX_FILE_CONTEXT_TOKENS * 4 // ~4 chars per token
-
-            val fileContents = filePaths.mapNotNull { filePath ->
-                try {
-                    // Проверяем лимит
-                    if (totalChars >= maxTotalChars) {
-                        logger.warn("⚠️ File context limit reached, skipping remaining files")
-                        return@mapNotNull null
-                    }
-
-                    logger.debug("Reading file: $filePath")
-
-                    // Вызываем android_studio_mcp для чтения файла
-                    val arguments = buildJsonObject {
-                        put("action", "read_file")
-                        put("file_path", filePath)
-                    }
-
-                    val result = mcpTools.callLocalTool(
-                        toolName = "android_studio_mcp",
-                        arguments = arguments,
-                        clientIp = null,
-                        userLocation = null,
-                        sessionId = sessionId
-                    )
-
-                    val jsonResult = kotlinx.serialization.json.Json.parseToJsonElement(result).jsonObject
-                    val status = jsonResult["status"]?.jsonPrimitive?.content
-
-                    if (status == "success") {
-                        var content = jsonResult["content"]?.jsonPrimitive?.content ?: ""
-                        val fileName = filePath.substringAfterLast("/")
-
-                        // Применяем ограничения
-                        val lines = content.lines()
-                        val maxLines = com.claude.agent.config.FileContextConfig.MAX_LINES_PER_FILE
-                        val maxChars = com.claude.agent.config.FileContextConfig.MAX_CHARS_PER_FILE
-
-                        var truncated = false
-                        if (lines.size > maxLines) {
-                            content = lines.take(maxLines).joinToString("\n")
-                            truncated = true
-                        }
-                        if (content.length > maxChars) {
-                            content = content.take(maxChars)
-                            truncated = true
-                        }
-
-                        totalChars += content.length
-
-                        val truncatedNote = if (truncated) " (truncated)" else ""
-                        logger.info("✅ Read file: $fileName (${content.length} chars)$truncatedNote")
-
-                        val formattedContent = if (truncated) {
-                            "### File: $filePath\n\n```\n$content\n... (truncated)\n```\n"
-                        } else {
-                            "### File: $filePath\n\n```\n$content\n```\n"
-                        }
-
-                        formattedContent
-                    } else {
-                        val error = jsonResult["error"]?.jsonPrimitive?.content ?: "Unknown error"
-                        logger.warn("Failed to read file $filePath: $error")
-                        null
-                    }
-                } catch (e: Exception) {
-                    logger.error("Error reading file $filePath: ${e.message}")
-                    null
-                }
-            }
-
-            if (fileContents.isEmpty()) {
-                logger.warn("No file contents retrieved")
-                return null
-            }
-
-            // Форматируем контекст
-            val context = buildString {
-                appendLine("📁 SELECTED FILES CONTEXT:")
-                appendLine()
-                fileContents.forEach { append(it) }
-            }
-
-            logger.info("File context built: ${context.length} chars from ${fileContents.size} files (~${context.length / 4} tokens)")
-            context
-
-        } catch (e: Exception) {
-            logger.error("Failed to retrieve file context: ${e.message}", e)
             null
         }
     }

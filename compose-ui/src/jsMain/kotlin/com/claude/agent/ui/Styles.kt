@@ -459,6 +459,24 @@ object AppStyles : StyleSheet() {
         property("z-index", "9998")
     }
 
+    val ticketPanel by style {
+        position(Position.Fixed)
+        top(0.px)
+        left(0.px)
+        property("right", "auto")
+        width(0.px)
+        height(100.vh)
+        property("overflow", "hidden")
+        backgroundColor(Color.white)
+        property("box-shadow", "5px 0 20px rgba(0, 0, 0, 0.1)")
+        property("transition", "width 0.3s ease")
+        display(DisplayStyle.Flex)
+        flexDirection(FlexDirection.Column)
+        property("border-right", "1px solid rgba(0, 0, 0, 0.08)")
+        property("flex-shrink", "0")
+        property("z-index", "9997")
+    }
+
     val panelHeader by style {
         property("background", "linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%)")
         color(Color.white)

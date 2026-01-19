@@ -10,6 +10,10 @@ logback = "1.5.14"
 dotenv = "6.4.2"
 compose = "1.6.10"
 pdfBox = "2.0.30"
+googleApiClient = "2.2.0"
+googleHttpClient = "1.44.1"
+googleAuthLibrary = "1.19.0"
+googlePlayPublisher = "v3-rev20251215-2.0.0"
 
 [libraries]
 kotlinGradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -53,12 +57,19 @@ pdfbox = { module = "org.apache.pdfbox:pdfbox", version = "pdfBox" }
 # Config
 dotenv = { module = "io.github.cdimascio:dotenv-kotlin", version.ref = "dotenv" }
 
+# Google Play Publisher API
+googleApiClient = { module = "com.google.api-client:google-api-client", version.ref = "googleApiClient" }
+googlePlayPublisher = { module = "com.google.apis:google-api-services-androidpublisher", version.ref = "googlePlayPublisher" }
+googleAuthLibrary = { module = "com.google.auth:google-auth-library-oauth2-http", version.ref = "googleAuthLibrary" }
+googleHttpClientGson = { module = "com.google.http-client:google-http-client-gson", version.ref = "googleHttpClient" }
+
 # Libraries can be bundled together for easier import
 [bundles]
 kotlinxEcosystem = ["kotlinxDatetime", "kotlinxSerialization", "kotlinxCoroutines"]
 ktorServer = ["ktorServerCore", "ktorServerNetty", "ktorServerCertificate", "ktorServerContentNegotiation", "ktorSerializationJson", "ktorServerCors", "ktorServerCallLogging", "ktorServerStatusPages", "ktorServerWebSockets"]
 ktorClient = ["ktorClientCore", "ktorClientOkHttp", "ktorClientContentNegotiation", "ktorClientLogging"]
 exposed = ["exposedCore", "exposedDao", "exposedJdbc"]
+googlePlay = ["googleApiClient", "googlePlayPublisher", "googleAuthLibrary", "googleHttpClientGson"]
 
 [plugins]
 kotlinPluginSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

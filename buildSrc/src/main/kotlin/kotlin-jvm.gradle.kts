@@ -10,8 +10,8 @@ plugins {
 }
 
 kotlin {
-    // Use a specific Java version to make it easier to work in different environments.
-    jvmToolchain(21)
+    // Use Java 24 as specified in CLAUDE.md
+    jvmToolchain(24)
 }
 
 tasks.withType<Test>().configureEach {

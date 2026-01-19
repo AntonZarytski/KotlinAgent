@@ -124,8 +124,9 @@ class AndroidStudioLocalMcp : Mcp.Local {
             ДЕЙСТВИЯ С ФАЙЛОВОЙ СИСТЕМОЙ (ТОЛЬКО ЛОКАЛЬНАЯ МАШИНА):
             - browse_files — список файлов и папок относительно корня проекта
             - read_file — чтение файла относительно корня проекта
+            - read_file_lines — чтение определенных строк файла (требуется file_path, опционально start_line, end_line, search_pattern)
+            - find_files — поиск файлов по паттерну (требуется pattern, опционально max_depth)
             - save_log — сохранить переданное содержимое в файл на локальной машине
-            - get_file_tree — получить дерево файлов проекта (исключая build, .idea, .gradle, .kotlin)
         
             КРИТИЧЕСКИЕ ПРАВИЛА:
         
@@ -146,6 +147,7 @@ class AndroidStudioLocalMcp : Mcp.Local {
                         putJsonArray("enum") {
                             add("set_project_path")
                             add("get_project_path")
+                            add("get_file_tree")
                             add("start_emulator")
                             add("stop_emulator")
                             add("list_emulators")
@@ -159,8 +161,9 @@ class AndroidStudioLocalMcp : Mcp.Local {
                             add("logcat_clear")
                             add("browse_files")
                             add("read_file")
+                            add("read_file_lines")
+                            add("find_files")
                             add("save_log")
-                            add("get_file_tree")
                         }
                     }
                     putJsonObject("project_path") {
@@ -223,14 +226,25 @@ class AndroidStudioLocalMcp : Mcp.Local {
                         put("description", "Name for the log file (without extension)")
                         put("default", "log")
                     }
-                    putJsonObject("root_path") {
+                    putJsonObject("start_line") {
+                        put("type", "integer")
+                        put("description", "Starting line number for read_file_lines (1-based, inclusive)")
+                    }
+                    putJsonObject("end_line") {
+                        put("type", "integer")
+                        put("description", "Ending line number for read_file_lines (1-based, inclusive)")
+                    }
+                    putJsonObject("search_pattern") {
                         put("type", "string")
-                        put("description", "Root path for file tree (for get_file_tree). If not specified, uses initialAndroidProjectPath")
+                        put("description", "Regex pattern to search for in read_file_lines")
+                    }
+                    putJsonObject("pattern") {
+                        put("type", "string")
+                        put("description", "File name pattern for find_files (e.g., '*.kt', 'MainActivity.*')")
                     }
                     putJsonObject("max_depth") {
                         put("type", "integer")
-                        put("description", "Maximum depth for file tree (for get_file_tree)")
-                        put("default", 10)
+                        put("description", "Maximum directory depth for find_files (default: unlimited)")
                     }
                 }
                 putJsonArray("required") { add("action") }

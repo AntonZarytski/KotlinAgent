@@ -48,7 +48,6 @@ object ApiClient {
     private var onStreamingText: ((StreamingTextData) -> Unit)? = null
     private var onToolResult: ((ToolResultData) -> Unit)? = null
     private var onNewMessage: ((Message) -> Unit)? = null
-    private var onTicketCreated: ((String) -> Unit)? = null
     private var currentSessionId: String? = null
     private var reconnectAttempts = 0
     private val maxReconnectAttempts = 5
@@ -147,13 +146,31 @@ object ApiClient {
         post("/api/sessions/$sessionId/mark_read", "{}") { it }
     }
 
+    suspend fun getFileTree(): FileTreeResponse {
+        return get("/api/file-tree") { text ->
+            jsonParser.decodeFromString<FileTreeResponse>(text)
+        }
+    }
+
+    suspend fun setProjectPath(projectPath: String, sessionId: String?): SetProjectPathResponse {
+        val request = SetProjectPathRequest(projectPath, sessionId)
+        return post("/api/set-project-path", request) { text ->
+            jsonParser.decodeFromString<SetProjectPathResponse>(text)
+        }
+    }
+
+    suspend fun getTickets(sessionId: String): TicketsResponse {
+        return get("/api/tickets?session_id=$sessionId") { text ->
+            jsonParser.decodeFromString<TicketsResponse>(text)
+        }
+    }
+
     // WebSocket functions
     fun connectWebSocket(
         sessionId: String,
         onStreamingTextCallback: (StreamingTextData) -> Unit,
         onToolResultCallback: (ToolResultData) -> Unit,
-        onNewMessageCallback: (Message) -> Unit,
-        onTicketCreatedCallback: ((String) -> Unit)? = null
+        onNewMessageCallback: (Message) -> Unit
     ) {
         // Close existing connection if switching sessions
         if (webSocket != null && currentSessionId != sessionId) {
@@ -169,7 +186,6 @@ object ApiClient {
         onStreamingText = onStreamingTextCallback
         onToolResult = onToolResultCallback
         onNewMessage = onNewMessageCallback
-        onTicketCreated = onTicketCreatedCallback
 
         val protocol = if (window.location.protocol == "https:") "wss:" else "ws:"
         val wsUrl = "$protocol//${window.location.host}/ws/$sessionId"
@@ -264,16 +280,6 @@ object ApiClient {
                         console.log("⚠️ new_message data is null")
                     }
                 }
-                "ticket_created" -> {
-                    console.log("🎫 Processing ticket_created...")
-                    if (message.data != null) {
-                        console.log("🎫 Ticket created: $message.data")
-                        onTicketCreated?.invoke(message.data)
-                        console.log("🎫 onTicketCreated callback invoked")
-                    } else {
-                        console.log("⚠️ ticket_created data is null")
-                    }
-                }
                 else -> {
                     console.log("⚠️ Unknown message type: ${message.type}")
                 }
@@ -293,87 +299,5 @@ object ApiClient {
 
     fun isWebSocketConnected(): Boolean {
         return webSocket?.readyState == WebSocket.OPEN
-    }
-
-    // Ticket API methods
-    suspend fun getTickets(page: Int = 0, pageSize: Int = 20): TicketsResponse {
-        return get("/api/tickets?page=$page&pageSize=$pageSize") { responseText ->
-            jsonParser.decodeFromString<TicketsResponse>(responseText)
-        }
-    }
-
-    suspend fun getTicket(ticketId: String): SupportTicket {
-        return get("/api/tickets/$ticketId") { responseText ->
-            jsonParser.decodeFromString<SupportTicket>(responseText)
-        }
-    }
-
-    suspend fun getSessionTickets(sessionId: String): TicketsResponse {
-        return get("/api/sessions/$sessionId/tickets") { responseText ->
-            jsonParser.decodeFromString<TicketsResponse>(responseText)
-        }
-    }
-
-    suspend fun createTicket(request: CreateTicketRequest): SupportTicket {
-        return post("/api/tickets", request) { responseText ->
-            jsonParser.decodeFromString<SupportTicket>(responseText)
-        }
-    }
-
-    suspend fun updateTicket(ticketId: String, request: UpdateTicketRequest): SupportTicket? {
-        val headers = Headers()
-        headers.append("Content-Type", "application/json")
-
-        val response = window.fetch(
-            "$baseUrl/api/tickets/$ticketId",
-            RequestInit(
-                method = "PATCH",
-                headers = headers,
-                body = jsonParser.encodeToString(UpdateTicketRequest.serializer(), request)
-            )
-        ).await()
-
-        val responseText = response.text().await()
-
-        // Если тикет был удален (закрыт), сервер возвращает 404
-        if (response.status.toInt() == 404) {
-            return null
-        }
-
-        // Если ответ пустой, тикет был удален
-        if (responseText.isBlank() || responseText == "null") {
-            return null
-        }
-
-        return jsonParser.decodeFromString<SupportTicket>(responseText)
-    }
-
-    suspend fun deleteTicket(ticketId: String) {
-        val response = window.fetch(
-            "$baseUrl/api/tickets/$ticketId",
-            RequestInit(method = "DELETE")
-        ).await()
-
-        if (!response.ok) {
-            throw Exception("Failed to delete ticket: ${response.statusText}")
-        }
-    }
-
-    // File Tree API methods
-    suspend fun getFileTree(sessionId: String? = null, rootPath: String? = null, maxDepth: Int = 10): FileTreeResponse {
-        val params = buildString {
-            append("?max_depth=$maxDepth")
-            if (sessionId != null) append("&session_id=$sessionId")
-            if (rootPath != null) append("&root_path=$rootPath")
-        }
-        return get("/api/file-tree$params") { text ->
-            jsonParser.decodeFromString<FileTreeResponse>(text)
-        }
-    }
-
-    suspend fun setProjectPath(request: SetProjectPathRequest) {
-        post("/api/file-tree/set-project", request) { text ->
-            jsonParser.decodeFromString<FileTreeResponse>(text)
-        }
     }
 }

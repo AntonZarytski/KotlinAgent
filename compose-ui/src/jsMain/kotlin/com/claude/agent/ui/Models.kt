@@ -49,13 +49,12 @@ data class Settings(
     val specMode: Boolean = false,
     val sendHistory: Boolean = true,
     val showTokenCount: Boolean = true,
-    val showAllIntermediateMessages: Boolean = false,  // Изменено на false - промежуточные сообщения не сохраняются в истории
-    val enabledTools: Set<String> = emptySet(),
+    val showAllIntermediateMessages: Boolean = true,
+    val enabledTools: Set<String> = setOf("plan_tool_chain", "android_studio_mcp"),  // По умолчанию включены
     val useRag: Boolean = false,                // Использовать RAG для контекста
-    val ragTopK: Int = 2,                       // Количество релевантных чанков (было 3)
-    val ragMinSimilarity: Float = 0.4f,         // Минимальный порог схожести (было 0.3)
-    val ragFilterEnabled: Boolean = true,       // Включить фильтрацию по порогу
-    val fileContextEnabled: Boolean = false     // Работать с выбранными файлами
+    val ragTopK: Int = 3,                       // Количество релевантных чанков
+    val ragMinSimilarity: Float = 0.3f,         // Минимальный порог схожести (0.0-1.0)
+    val ragFilterEnabled: Boolean = true        // Включить фильтрацию по порогу
 )
 
 @Serializable
@@ -71,11 +70,10 @@ data class ChatRequest(
     val user_location: UserLocation? = null,
     val show_intermediate_messages: Boolean = true,
     val use_rag: Boolean = false,               // Использовать RAG для контекста
-    val rag_top_k: Int = 2,                     // Количество релевантных чанков (было 3)
-    val rag_min_similarity: Double = 0.4,       // Минимальный порог схожести (было 0.3)
+    val rag_top_k: Int = 3,                     // Количество релевантных чанков
+    val rag_min_similarity: Double = 0.3,       // Минимальный порог схожести (0.0-1.0)
     val rag_filter_enabled: Boolean = true,     // Включить фильтрацию по порогу
-    val file_context_enabled: Boolean = false,  // Работать с выбранными файлами
-    val selected_files: List<String> = emptyList() // Пути к выбранным файлам
+    val selected_files: List<String> = emptyList()  // Выбранные файлы из file tree
 )
 
 @Serializable
@@ -134,84 +132,62 @@ data class UnreadCountsResponse(
     val unread_counts: Map<String, Int> = emptyMap()
 )
 
-// Ticket models
-@Serializable
-data class TicketUpdateEntry(
-    val timestamp: String,
-    val updateType: String,
-    val description: String
-)
-
-@Serializable
-data class SupportTicket(
-    val id: String,
-    val sessionId: String,  // ID сессии чата (обязательное поле)
-    val title: String,
-    val description: String,
-    val status: String,  // OPEN, IN_PROGRESS, WAITING_FOR_USER, RESOLVED, CLOSED
-    val priority: String,  // LOW, MEDIUM, HIGH, CRITICAL
-    val category: String? = null,
-    val createdAt: String,
-    val updatedAt: String,
-    val resolvedAt: String? = null,
-    val closedAt: String? = null,
-    val assignedTo: String? = null,
-    val tags: List<String> = emptyList(),
-    val autoCreated: Boolean = false,
-    val updateHistory: List<TicketUpdateEntry> = emptyList()
-)
-
-@Serializable
-data class TicketsResponse(
-    val tickets: List<SupportTicket> = emptyList(),
-    val total: Int = 0,
-    val page: Int = 0,
-    val pageSize: Int = 20
-)
-
-@Serializable
-data class CreateTicketRequest(
-    val sessionId: String,  // ID сессии чата (обязательное поле)
-    val title: String,
-    val description: String,
-    val priority: String = "MEDIUM",
-    val category: String? = null,
-    val tags: List<String> = emptyList()
-)
-
-@Serializable
-data class UpdateTicketRequest(
-    val status: String? = null,
-    val priority: String? = null,
-    val assignedTo: String? = null,
-    val category: String? = null,
-    val tags: List<String>? = null
-)
-
-// File Tree Models
+// FileTree models for file selection
 @Serializable
 data class FileTreeNode(
     val name: String,
-    val type: String, // "file" or "directory"
     val path: String,
-    val absolute_path: String,
-    val size: Long? = null,
-    val extension: String? = null,
-    val last_modified: Long? = null,
-    val children: List<FileTreeNode> = emptyList(),
-    val children_count: Int = 0
+    val type: String,  // "file" or "directory"
+    val children: List<FileTreeNode>? = null
 )
 
 @Serializable
 data class FileTreeResponse(
-    val status: String,
-    val root_path: String,
-    val max_depth: Int,
-    val tree: FileTreeNode? = null
+    val tree: FileTreeNode? = null,
+    val projectPath: String? = null,
+    val error: String? = null
 )
 
 @Serializable
 data class SetProjectPathRequest(
+    val projectPath: String,
+    val sessionId: String? = null
+)
+
+@Serializable
+data class SetProjectPathResponse(
+    val success: Boolean,
+    val projectPath: String? = null,
+    val error: String? = null
+)
+
+// Selected file context for agent
+data class SelectedFile(
+    val path: String,
+    val content: String
+)
+
+// Support Tickets models
+@Serializable
+data class TimelineEntry(
+    val timestamp: String,
+    val entry: String
+)
+
+@Serializable
+data class Ticket(
+    val id: String,
     val sessionId: String,
-    val projectPath: String
+    val title: String,
+    val description: String,
+    val status: String,  // opened, inProgress, finished
+    val createdAt: String,
+    val updatedAt: String,
+    val finishedAt: String? = null,
+    val timeline: List<TimelineEntry> = emptyList()
+)
+
+@Serializable
+data class TicketsResponse(
+    val tickets: List<Ticket> = emptyList()
 )

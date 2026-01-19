@@ -40,11 +40,7 @@ class ReminderMcp(
    - "tool_arguments": JSON объект с аргументами для инструмента
    - "user_request": оригинальный запрос пользователя
 
-ВАЖНО:
-- Если в запросе упоминается погода, авиабилеты или другие данные которые требуют вызова инструмента - ОБЯЗАТЕЛЬНО используй task_type="mcp_tool" и укажи правильный tool_name!
-- Система УМНАЯ: если пользователь уточняет детали существующей задачи (ai_response или mcp_tool), информация автоматически добавляется в task_context существующей задачи вместо создания дубликата
-- Новая задача создается только для принципиально новых запросов или для простых reminder
-- При уточнении деталей (например, "а сделай это в 15:00 вместо 14:00") - обновляется существующая задача
+ВАЖНО: Если в запросе упоминается погода, авиабилеты или другие данные которые требуют вызова инструмента - ОБЯЗАТЕЛЬНО используй task_type="mcp_tool" и укажи правильный tool_name!
 """,
             enabled = true,
             input_schema = JsonObject(
@@ -192,10 +188,7 @@ class ReminderMcp(
                     }
                 }
 
-                // Используем умный метод создания/обновления задачи
-                // Для ai_response и mcp_tool задач - ищем существующие и обновляем контекст
-                // Для простых reminder - всегда создаем новые
-                val reminder = reminderService.findOrCreateReminder(
+                val reminder = reminderService.addReminder(
                     text = text,
                     dueAt = dueAt,
                     sessionId = sessionId,
@@ -203,8 +196,7 @@ class ReminderMcp(
                     recurrenceInterval = recurrenceInterval,
                     recurrenceEndDate = recurrenceEndDate,
                     taskType = taskType,
-                    taskContext = taskContext,
-                    forceCreate = false // Автоматически определяем: создавать или обновлять
+                    taskContext = taskContext
                 )
                 Json.Default.encodeToString(reminder)
             }

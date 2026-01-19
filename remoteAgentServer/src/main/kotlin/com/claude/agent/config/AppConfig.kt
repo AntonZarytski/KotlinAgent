@@ -100,12 +100,18 @@ object AppConfig {
         getEnv("GITHUB_TOKEN")
     }
 
+    // === Google Play Publisher Integration ===
+    val googlePlayServiceAccountPath: String? by lazy {
+        getEnv("GOOGLE_PLAY_SERVICE_ACCOUNT_PATH")
+    }
+
     init {
         logger.info("=== Конфигурация приложения ===")
         logger.info("Порт: $port")
         logger.info("Хост: $host")
         logger.info("База данных: $databasePath")
         logger.info("Статические файлы: $staticFolder")
+        logger.info("Google Play Service Account: ${if (googlePlayServiceAccountPath != null) "настроен" else "не настроен"}")
         logger.info("================================")
     }
 }
