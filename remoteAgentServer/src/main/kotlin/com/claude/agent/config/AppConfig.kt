@@ -16,12 +16,12 @@ object AppConfig {
     // Загружаем .env файл (если существует)
     private val dotenv: Dotenv? = try {
         // Ищем .env в нескольких местах
-        val possiblePaths = listOf(
+        val possiblePaths = listOfNotNull(
             ".",                    // Текущая директория
             "..",                   // Родительская директория (для запуска из app/)
             System.getProperty("user.dir"),  // Рабочая директория JVM
             System.getenv("PWD")    // Текущая директория shell
-        ).filterNotNull().distinct()
+        ).distinct()
 
         logger.info("Поиск .env файла в: $possiblePaths")
         logger.info("Текущая рабочая директория: ${System.getProperty("user.dir")}")
@@ -58,8 +58,27 @@ object AppConfig {
     }
 
     // === API ключи ===
-    val anthropicApiKey: String by lazy {
+
+    /**
+     * Опциональный API ключ Anthropic Claude.
+     * Возвращает null если ключ не найден.
+     */
+    val anthropicApiKeyOrNull: String? by lazy {
         val key = getEnv("ANTHROPIC_API_KEY")
+        if (!key.isNullOrBlank()) {
+            logger.info("✅ Anthropic API ключ загружен: ${key.take(10)}...${key.takeLast(4)}")
+        } else {
+            logger.warn("⚠️ ANTHROPIC_API_KEY не найден - Claude провайдер будет недоступен")
+        }
+        key
+    }
+
+    /**
+     * Обязательный API ключ Anthropic Claude.
+     * Выбрасывает исключение если ключ не найден.
+     */
+    val anthropicApiKey: String by lazy {
+        val key = anthropicApiKeyOrNull
 
         // Для отладки
         if (key.isNullOrBlank()) {
@@ -73,7 +92,6 @@ object AppConfig {
         require(!key.isNullOrBlank()) {
             ErrorMessages.API_KEY_NOT_FOUND
         }
-        logger.info("API ключ загружен: ${key.take(10)}...${key.takeLast(4)}")
         key
     }
 
@@ -105,6 +123,19 @@ object AppConfig {
         getEnv("GOOGLE_PLAY_SERVICE_ACCOUNT_PATH")
     }
 
+    // === LLM Provider Configuration ===
+    val llmProvider: String by lazy {
+        getEnv("LLM_PROVIDER")?.lowercase() ?: "local"
+    }
+
+    val ollamaUrl: String by lazy {
+        getEnv("OLLAMA_URL") ?: "http://localhost:11434"
+    }
+
+    val ollamaModel: String by lazy {
+        getEnv("OLLAMA_MODEL") ?: "qwen2.5-coder:7b-instruct"
+    }
+
     init {
         logger.info("=== Конфигурация приложения ===")
         logger.info("Порт: $port")
@@ -112,6 +143,11 @@ object AppConfig {
         logger.info("База данных: $databasePath")
         logger.info("Статические файлы: $staticFolder")
         logger.info("Google Play Service Account: ${if (googlePlayServiceAccountPath != null) "настроен" else "не настроен"}")
+        logger.info("LLM Provider: $llmProvider")
+        if (llmProvider == "local") {
+            logger.info("Ollama URL: $ollamaUrl")
+            logger.info("Ollama Model: $ollamaModel")
+        }
         logger.info("================================")
     }
 }

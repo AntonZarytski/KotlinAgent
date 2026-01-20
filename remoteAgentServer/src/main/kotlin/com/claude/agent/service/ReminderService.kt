@@ -2,7 +2,8 @@ package com.claude.agent.service
 
 import com.claude.agent.database.ConversationRepository
 import com.claude.agent.models.Reminder
-import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.models.Message
+import com.claude.agent.llm.LlmProvider
 import com.claude.agent.llm.mcp.MCPTools
 import kotlinx.coroutines.*
 import kotlinx.serialization.encodeToString
@@ -23,8 +24,8 @@ class ReminderService(
     private val logger = LoggerFactory.getLogger(ReminderService::class.java)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // ClaudeClient and MCPTools will be set after initialization to avoid circular dependency
-    var claudeClient: ClaudeClient? = null
+    // LlmProvider and MCPTools will be set after initialization to avoid circular dependency
+    var llmProvider: LlmProvider? = null
     var mcpTools: MCPTools? = null
 
     // Map of reminder ID to its timer job
@@ -173,8 +174,8 @@ class ReminderService(
             return
         }
 
-        if (claudeClient == null) {
-            logger.error("ClaudeClient not available for AI response task")
+        if (llmProvider == null) {
+            logger.error("LlmProvider not available for AI response task")
             handleSimpleReminder(reminder)
             return
         }
@@ -215,28 +216,35 @@ class ReminderService(
                     userRequest
                 }
 
-                // Call Claude API
-                val (reply, usage, error) = claudeClient!!.sendMessage(
-                    userMessage = promptMessage,
-                    conversationHistory = history,
+                val systemPrompt = "Ты - полезный AI ассистент. Отвечай на вопросы пользователя четко и по делу."
+
+                val userMessage = Message(
+                    role = "user",
+                    content = promptMessage
+                )
+
+                val messages = history + userMessage
+
+                // Call LLM provider
+                val response = llmProvider!!.generate(
+                    systemPrompt = systemPrompt,
+                    messages = messages,
                     sessionId = reminder.sessionId,
-                    userLocation = null,
                     enabledTools = emptyList()
                 )
 
-                if (error != null) {
-                    logger.error("Error from Claude API: $error")
+                if (response.error != null) {
+                    logger.error("Error from LLM provider: ${response.error}")
                     handleSimpleReminder(reminder)
-                } else if (reply != null) {
+                } else if (response.reply != null) {
                     logger.info("AI response generated successfully for session: ${reminder.sessionId}")
-                    // Response is already saved to database by ClaudeClient
-                    // Just broadcast it via WebSocket
+                    // Save response to database
                     val message = conversationRepository.saveMessage(
                         sessionId = reminder.sessionId,
                         role = "assistant",
-                        content = reply,
-                        inputTokens = usage?.input_tokens,
-                        outputTokens = usage?.output_tokens
+                        content = response.reply,
+                        inputTokens = response.usage?.input_tokens,
+                        outputTokens = response.usage?.output_tokens
                     )
                     broadcastMessage(reminder.sessionId, message, reminder.text)
                 }
@@ -260,8 +268,8 @@ class ReminderService(
             return
         }
 
-        if (claudeClient == null) {
-            logger.error("ClaudeClient not available for MCP tool task")
+        if (llmProvider == null) {
+            logger.error("LlmProvider not available for MCP tool task")
             handleSimpleReminder(reminder)
             return
         }
@@ -305,28 +313,36 @@ class ReminderService(
                 logger.info("✅ MCP tool executed: toolName='$toolName', result length=${toolResult?.length ?: 0}")
                 logger.debug("MCP tool result (first 500 chars): ${toolResult?.take(500)}")
 
-                // Now ask Claude to format the tool result into a human-readable response
+                // Now ask LLM to format the tool result into a human-readable response
                 // Get conversation history
                 val history = conversationRepository.getSessionHistory(reminder.sessionId)
 
-                // Create a prompt that asks Claude to interpret the tool result
+                // Create a prompt that asks LLM to interpret the tool result
                 val interpretationPrompt = if (userRequest.isNotBlank()) {
                     "Пользователь запросил: \"$userRequest\"\n\nИнструмент '$toolName' вернул следующий результат:\n$toolResult\n\nПожалуйста, представь этот результат в удобном для чтения формате."
                 } else {
                     "Инструмент '$toolName' вернул следующий результат:\n$toolResult\n\nПожалуйста, представь этот результат в удобном для чтения формате."
                 }
 
-                // Call Claude API to format the response
-                val (reply, usage, error) = claudeClient!!.sendMessage(
-                    userMessage = interpretationPrompt,
-                    conversationHistory = history,
+                val systemPrompt = "Ты - полезный AI ассистент. Форматируй результаты инструментов в удобный для чтения вид."
+
+                val userMessage = Message(
+                    role = "user",
+                    content = interpretationPrompt
+                )
+
+                val messages = history + userMessage
+
+                // Call LLM provider to format the response
+                val response = llmProvider!!.generate(
+                    systemPrompt = systemPrompt,
+                    messages = messages,
                     sessionId = reminder.sessionId,
-                    userLocation = null,
                     enabledTools = emptyList()
                 )
 
-                if (error != null) {
-                    logger.error("Error from Claude API: $error")
+                if (response.error != null) {
+                    logger.error("Error from LLM provider: ${response.error}")
                     // Fallback to raw result
                     val resultMessage = "🔧 **Результат автоматического вызова инструмента '$toolName':**\n\n$toolResult"
                     val message = conversationRepository.saveMessage(
@@ -335,15 +351,15 @@ class ReminderService(
                         content = resultMessage
                     )
                     broadcastMessage(reminder.sessionId, message, reminder.text)
-                } else if (reply != null) {
-                    logger.info("MCP tool result formatted successfully by Claude")
+                } else if (response.reply != null) {
+                    logger.info("MCP tool result formatted successfully by LLM")
                     // Save the formatted response
                     val message = conversationRepository.saveMessage(
                         sessionId = reminder.sessionId,
                         role = "assistant",
-                        content = reply,
-                        inputTokens = usage?.input_tokens,
-                        outputTokens = usage?.output_tokens
+                        content = response.reply,
+                        inputTokens = response.usage?.input_tokens,
+                        outputTokens = response.usage?.output_tokens
                     )
                     broadcastMessage(reminder.sessionId, message, reminder.text)
                 }

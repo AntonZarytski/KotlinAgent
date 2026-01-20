@@ -23,7 +23,7 @@ class GooglePlayService(
     private val serviceAccountKeyPath: String
 ) {
     private val logger = LoggerFactory.getLogger(GooglePlayService::class.java)
-    private val applicationName = "Claude AI Agent"
+    private val applicationName = "AI Agent"
 
     private val androidPublisher: AndroidPublisher by lazy {
         try {

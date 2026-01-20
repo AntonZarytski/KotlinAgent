@@ -2,7 +2,7 @@ package com.claude.agent.service
 
 import com.claude.agent.config.CompressionConfig
 import com.claude.agent.models.Message
-import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.llm.LlmProvider
 import org.slf4j.LoggerFactory
 
 /**
@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory
  * - Оценкой экономии токенов
  */
 class HistoryCompressor(
-    private val claudeClient: ClaudeClient,
+    private val llmProvider: LlmProvider,
     private val tokenMetricsService: TokenMetricsService? = null
 ) {
     private val logger = LoggerFactory.getLogger(HistoryCompressor::class.java)
@@ -137,37 +137,41 @@ class HistoryCompressor(
     }
 
     /**
-     * Создаёт краткое резюме истории диалога используя Claude API.
+     * Создаёт краткое резюме истории диалога используя LLM провайдер.
      */
     private suspend fun createSummary(messages: List<Message>): String {
         if (messages.isEmpty()) return ""
 
         val conversationText = formatConversation(messages)
 
-        val summaryPrompt = """Создай ОЧЕНЬ краткое резюме диалога (максимум 2-3 предложения).
-Укажи только ключевые темы, о которых говорили. Без деталей, без форматирования.
+        val systemPrompt = """Ты - помощник для создания кратких резюме диалогов.
+Создай ОЧЕНЬ краткое резюме диалога (максимум 2-3 предложения).
+Укажи только ключевые темы, о которых говорили. Без деталей, без форматирования."""
 
-Диалог:
+        val userMessage = Message(
+            role = "user",
+            content = """Диалог:
 $conversationText
 
 КРАТКОЕ резюме (2-3 предложения):"""
+        )
 
         return try {
             logger.info("Создание summary для ${messages.size} сообщений...")
 
-            val (reply, _, error) = claudeClient.sendMessage(
-                userMessage = summaryPrompt,
+            val response = llmProvider.generate(
+                systemPrompt = systemPrompt,
+                messages = listOf(userMessage),
                 maxTokens = CompressionConfig.SUMMARY_MAX_TOKENS,
-                temperature = 0.0,  // Детерминированный вывод
-                conversationHistory = emptyList()
+                temperature = 0.0  // Детерминированный вывод
             )
 
-            if (error != null) {
-                logger.error("Ошибка создания summary: $error")
+            if (response.error != null) {
+                logger.error("Ошибка создания summary: ${response.error}")
                 return fallbackSummary(messages)
             }
 
-            val summary = reply?.trim() ?: fallbackSummary(messages)
+            val summary = response.reply?.trim() ?: fallbackSummary(messages)
             logger.info("Summary создан: ${summary.length} символов")
             summary
 

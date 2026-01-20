@@ -52,6 +52,10 @@ class CLIArgumentParser {
                     options.ragDbPath = getNextArgument(args, i, "--rag-db-path")
                     i += 2
                 }
+                "--llm-provider" -> {
+                    options.llmProvider = getNextArgument(args, i, "--llm-provider")
+                    i += 2
+                }
                 else -> {
                     throw IllegalArgumentException("Unknown option: ${args[i]}")
                 }
@@ -83,6 +87,7 @@ data class ReviewOptions(
     var prDescription: String? = null,
     var repoPath: String = System.getProperty("user.dir"),
     var enableRag: Boolean = false,
-    var ragDbPath: String = "rag_index.db"
+    var ragDbPath: String = "rag_index.db",
+    var llmProvider: String? = null  // "claude" или "local"/"qwen"
 )
 

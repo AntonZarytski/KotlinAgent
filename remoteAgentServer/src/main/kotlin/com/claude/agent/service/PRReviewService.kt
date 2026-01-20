@@ -1,8 +1,9 @@
 package com.claude.agent.service
 
 import com.claude.agent.common.models.*
-import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.llm.LlmProvider
 import com.claude.agent.llm.mcp.MCPTools
+import com.claude.agent.models.Message
 import com.claude.agent.service.review.*
 import org.slf4j.LoggerFactory
 
@@ -12,13 +13,13 @@ import org.slf4j.LoggerFactory
  * Координирует процесс ревью:
  * - Сбор данных о PR через GitRepositoryMcp
  * - Получение релевантного контекста из RAG
- * - Генерация ревью через Claude API
+ * - Генерация ревью через LLM провайдер
  * - Публикация результатов в GitHub
  *
  * Делегирует специфичные задачи специализированным компонентам.
  */
 class PRReviewService(
-    private val claudeClient: ClaudeClient,
+    private val llmProvider: LlmProvider,
     private val mcpTools: MCPTools,
     private val ragService: RagService? = null,
     private val ollamaEmbeddingClient: OllamaEmbeddingClient? = null,
@@ -71,7 +72,7 @@ class PRReviewService(
 
 
     /**
-     * Генерирует ревью через Claude API
+     * Генерирует ревью через LLM провайдер
      */
     private suspend fun generateReview(
         prInfo: PRInfo,
@@ -81,30 +82,45 @@ class PRReviewService(
     ): PRReview {
         logger.info("🤖 Generating AI review...")
 
-        // Формируем промпт для Claude
+        // Формируем промпт
         val prompt = promptBuilder.buildPrompt(prInfo, prData, ragContext)
 
-        // Отправляем запрос к Claude
-        val response = claudeClient.sendMessage(
-            userMessage = prompt,
-            sessionId = sessionId,
+        val systemPrompt = """You are an expert code reviewer. Analyze the provided code changes and provide constructive feedback.
+Focus on:
+- Code quality and best practices
+- Potential bugs and edge cases
+- Performance considerations
+- Security issues
+- Maintainability and readability
+
+Provide your review in a structured format."""
+
+        val userMessage = Message(
+            role = "user",
+            content = prompt
+        )
+
+        // Отправляем запрос к LLM провайдеру
+        val response = llmProvider.generate(
+            systemPrompt = systemPrompt,
+            messages = listOf(userMessage),
             model = "claude-sonnet-4-20250514",
             maxTokens = 8000,
             temperature = 0.3, // Более детерминированный вывод для code review
-            showIntermediateMessages = false,
-            useRag = false // RAG уже включен в промпт
+            sessionId = sessionId,
+            showIntermediateMessages = false
         )
 
         if (response.error != null) {
-            throw ClaudeAPIException("Claude API error: ${response.error}")
+            throw ClaudeAPIException("LLM API error: ${response.error}")
         }
 
         val reviewText = response.reply
-            ?: throw ClaudeAPIException("Empty response from Claude")
+            ?: throw ClaudeAPIException("Empty response from LLM")
 
-        logger.info("📄 Claude response length: ${reviewText.length} chars")
+        logger.info("📄 LLM response length: ${reviewText.length} chars")
 
-        // Парсим ответ Claude и формируем структурированное ревью
+        // Парсим ответ и формируем структурированное ревью
         return responseParser.parse(reviewText)
     }
 

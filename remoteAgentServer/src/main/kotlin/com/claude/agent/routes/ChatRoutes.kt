@@ -3,7 +3,7 @@ package com.claude.agent.routes
 import com.claude.agent.config.ErrorMessages
 import com.claude.agent.database.ConversationRepository
 import com.claude.agent.models.*
-import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.llm.LlmProviderFactory
 import com.claude.agent.llm.SystemPrompts
 import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.service.HistoryCompressor
@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory
  * Аналог эндпоинтов /api/chat и /api/count_tokens из App.py.
  */
 fun Route.chatRoutes(
-    claudeClient: ClaudeClient,
+    llmProviderFactory: LlmProviderFactory,
     mcpTools: MCPTools,
     historyCompressor: HistoryCompressor,
     repository: ConversationRepository
@@ -137,50 +137,66 @@ $context
                 request.message
             }
 
-            val claudeResponse = claudeClient.sendMessage(
-                userMessage = actualMessage,
+            // Выбираем LLM провайдер через фабрику
+            val llmProvider = llmProviderFactory.getProvider(request.llm_provider)
+            val llmType = request.llm_provider ?: "claude" // Определяем тип LLM для оптимизации промпта
+            logger.info("Using LLM provider: ${llmProvider.getProviderName()}, type: $llmType")
+
+            // Формируем системный промпт с учетом типа LLM
+            val systemPrompt = SystemPrompts.getSystemPrompt(
                 outputFormat = request.output_format,
-                maxTokens = maxTokens,
                 specMode = request.spec_mode,
-                conversationHistory = conversationHistory,
+                enabledTools = if (isHelpCommand) emptyList() else request.enabled_tools,
+                isRagEnabled = false,
+                llmType = llmType
+            )
+
+            // Формируем сообщения для провайдера
+            val messages = conversationHistory + Message(
+                role = "user",
+                content = actualMessage,
+                timestamp = java.time.Instant.now().toString()
+            )
+
+            // Вызываем LLM провайдер
+            val llmResponse = llmProvider.generate(
+                systemPrompt = systemPrompt,
+                messages = messages,
+                model = null, // Используем модель по умолчанию для провайдера
+                maxTokens = maxTokens,
                 temperature = temperature,
-                enabledTools = if (isHelpCommand) emptyList() else request.enabled_tools, // Отключаем tools для /help
+                enabledTools = if (isHelpCommand) emptyList() else request.enabled_tools,
                 clientIp = clientIp,
                 userLocation = request.user_location,
                 sessionId = request.session_id,
-                showIntermediateMessages = request.show_intermediate_messages,
-                useRag = false, // Отключаем RAG для /help, т.к. контекст уже получен
-                ragTopK = request.rag_top_k,
-                ragMinSimilarity = request.rag_min_similarity,
-                ragFilterEnabled = request.rag_filter_enabled,
-                selectedFiles = request.selected_files
+                showIntermediateMessages = request.show_intermediate_messages
             )
 
             // Обработка ошибок
-            if (claudeResponse.error != null) {
-                logger.error("Ошибка от Claude API: ${claudeResponse.error}")
-                call.respond(HttpStatusCode.InternalServerError, ErrorResponse(claudeResponse.error))
+            if (llmResponse.error != null) {
+                logger.error("Ошибка от LLM: ${llmResponse.error}")
+                call.respond(HttpStatusCode.InternalServerError, ErrorResponse(llmResponse.error))
                 return@post
             }
 
             // Сохраняем ответ ассистента в БД
-            if (request.session_id != null && claudeResponse.reply != null) {
+            if (request.session_id != null && llmResponse.reply != null) {
                 repository.saveMessage(
                     sessionId = request.session_id,
                     role = "assistant",
-                    content = claudeResponse.reply,
-                    inputTokens = claudeResponse.usage?.input_tokens,
-                    outputTokens = claudeResponse.usage?.output_tokens
+                    content = llmResponse.reply,
+                    inputTokens = llmResponse.usage?.input_tokens,
+                    outputTokens = llmResponse.usage?.output_tokens
                 )
             }
 
             // Формируем ответ
             val response = ChatResponse(
-                reply = claudeResponse.reply ?: "",
-                usage = claudeResponse.usage,
+                reply = llmResponse.reply ?: "",
+                usage = llmResponse.usage,
                 compressed_history = if (compressionApplied) conversationHistory else null,
                 compression_applied = compressionApplied,
-                intermediate_messages = claudeResponse.intermediateMessages
+                intermediate_messages = llmResponse.intermediateMessages
             )
 
             call.respond(HttpStatusCode.OK, response)
@@ -206,7 +222,14 @@ $context
             logger.info("Подсчёт токенов: format=${request.output_format}, spec=${request.spec_mode}, " +
                     "history_len=${request.conversation_history.size}")
             // Формируем системный промпт и сообщения
-            val systemPrompt = SystemPrompts.getSystemPrompt(outputFormat = request.output_format, specMode = request.spec_mode, enabledTools = emptyList(), isRagEnabled = false)
+            val llmType = request.llm_provider ?: "claude"
+            val systemPrompt = SystemPrompts.getSystemPrompt(
+                outputFormat = request.output_format,
+                specMode = request.spec_mode,
+                enabledTools = emptyList(),
+                isRagEnabled = false,
+                llmType = llmType
+            )
             val messages = mutableListOf<Message>()
             messages.addAll(request.conversation_history)
             messages.add(Message("user", request.message))

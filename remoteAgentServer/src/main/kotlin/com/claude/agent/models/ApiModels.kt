@@ -50,7 +50,8 @@ data class ChatRequest(
     val rag_top_k: Int = 3,                 // Количество релевантных чанков
     val rag_min_similarity: Double = 0.3,   // Минимальный порог схожести (0.0-1.0)
     val rag_filter_enabled: Boolean = true, // Включить фильтрацию по порогу
-    val selected_files: List<String> = emptyList() // Выбранные файлы из file tree
+    val selected_files: List<String> = emptyList(), // Выбранные файлы из file tree
+    val llm_provider: String? = null        // LLM провайдер: "claude" или "local" (null = использовать из конфига)
 )
 
 @Serializable
@@ -73,7 +74,8 @@ data class CountTokensRequest(
     val message: String,
     val output_format: String = "default",
     val spec_mode: Boolean = false,
-    val conversation_history: List<Message> = emptyList()
+    val conversation_history: List<Message> = emptyList(),
+    val llm_provider: String? = null
 )
 
 @Serializable

@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory
  *
  * Аналог эндпоинтов /health и /api/tools из App.py.
  */
-fun Route.healthRoutes(claudeClient: ClaudeClient, mcpTools: MCPTools) {
+fun Route.healthRoutes(claudeClient: ClaudeClient?, mcpTools: MCPTools) {
     val logger = LoggerFactory.getLogger("HealthRoutes")
 
     /**
@@ -28,7 +28,7 @@ fun Route.healthRoutes(claudeClient: ClaudeClient, mcpTools: MCPTools) {
             val response = HealthResponse(
                 status = "ok",
                 timestamp = Instant.now().toString(),
-                api_key_configured = claudeClient.isApiKeyConfigured()
+                api_key_configured = claudeClient?.isApiKeyConfigured() ?: false
             )
             call.respond(HttpStatusCode.OK, response)
         } catch (e: Exception) {

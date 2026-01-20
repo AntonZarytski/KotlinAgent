@@ -50,11 +50,12 @@ data class Settings(
     val sendHistory: Boolean = true,
     val showTokenCount: Boolean = true,
     val showAllIntermediateMessages: Boolean = true,
-    val enabledTools: Set<String> = setOf("plan_tool_chain", "android_studio_mcp"),  // По умолчанию включены
+    val enabledTools: Set<String> = setOf("plan_actions", "android_studio_mcp", "support_ticket_mcp", "project_help"),  // По умолчанию включены (исправлено: plan_tool_chain -> plan_actions)
     val useRag: Boolean = false,                // Использовать RAG для контекста
     val ragTopK: Int = 3,                       // Количество релевантных чанков
     val ragMinSimilarity: Float = 0.3f,         // Минимальный порог схожести (0.0-1.0)
-    val ragFilterEnabled: Boolean = true        // Включить фильтрацию по порогу
+    val ragFilterEnabled: Boolean = true,       // Включить фильтрацию по порогу
+    val llmProvider: String = "local"           // LLM провайдер: "claude" или "local"
 )
 
 @Serializable
@@ -73,7 +74,8 @@ data class ChatRequest(
     val rag_top_k: Int = 3,                     // Количество релевантных чанков
     val rag_min_similarity: Double = 0.3,       // Минимальный порог схожести (0.0-1.0)
     val rag_filter_enabled: Boolean = true,     // Включить фильтрацию по порогу
-    val selected_files: List<String> = emptyList()  // Выбранные файлы из file tree
+    val selected_files: List<String> = emptyList(),  // Выбранные файлы из file tree
+    val llm_provider: String? = null            // LLM провайдер: "claude" или "local"
 )
 
 @Serializable

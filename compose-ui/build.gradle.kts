@@ -78,21 +78,26 @@ val generateBuildInfo by tasks.registering {
     val outputFile = outputDir.get().file("BuildInfo.kt")
 
     outputs.file(outputFile)
-    // Всегда выполнять задачу, чтобы обновлять время сборки
-//    outputs.upToDateWhen { false }
+
+    // ВАЖНО: Делаем задачу up-to-date, если файл уже существует
+    // Это предотвращает бесконечную пересборку в continuous mode
+    outputs.upToDateWhen { outputFile.asFile.exists() }
 
     doLast {
-        val timestamp = LocalDateTime.now()
-            .format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss"))
+        // Генерируем timestamp только если файл не существует
+        if (!outputFile.asFile.exists()) {
+            val timestamp = LocalDateTime.now()
+                .format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss"))
 
-        outputDir.get().asFile.mkdirs()
-        outputFile.asFile.writeText("""
-            package com.claude.agent.ui
+            outputDir.get().asFile.mkdirs()
+            outputFile.asFile.writeText("""
+                package com.claude.agent.ui
 
-            object BuildInfo {
-                const val BUILD_TIME = "$timestamp"
-            }
-        """.trimIndent())
+                object BuildInfo {
+                    const val BUILD_TIME = "$timestamp"
+                }
+            """.trimIndent())
+        }
     }
 }
 
@@ -124,6 +129,8 @@ val cleanKotlinJsCache by tasks.registering(Delete::class) {
     delete(layout.buildDirectory.dir("kotlin"))
 }
 
+// Очищаем кеши ТОЛЬКО для production сборки
+// НЕ очищаем для обычной компиляции, чтобы избежать бесконечной пересборки
 tasks.named("jsBrowserProductionWebpack") {
     dependsOn(cleanWebpackCache)
 }
@@ -132,10 +139,8 @@ tasks.named("jsBrowserDistribution") {
     dependsOn(cleanWebpackCache, cleanKotlinJsCache)
 }
 
-// Очищаем кеш перед каждой компиляцией для стабильности
-tasks.named("compileKotlinJs") {
-    dependsOn(cleanKotlinJsCache)
-}
+// УБРАНО: cleanKotlinJsCache из compileKotlinJs
+// Это вызывало бесконечную пересборку в continuous mode
 
 //// Создаём алиас jsBrowserRun для удобства разработки
 //// Kotlin/JS создаёт два отдельных таска: jsBrowserDevelopmentRun и jsBrowserProductionRun

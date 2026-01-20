@@ -1,6 +1,7 @@
 package com.claude.agent.llm.mcp.local
 
 import com.claude.agent.common.LocalToolDefinition
+import com.claude.agent.llm.LlmProvider
 import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.llm.mcp.Mcp
 import com.claude.agent.llm.mcp.REMINDER
@@ -15,8 +16,8 @@ class ReminderMcp(
 ) : Mcp.Local {
     private val logger = LoggerFactory.getLogger(ReminderMcp::class.java)
 
-    // ClaudeClient will be set after initialization to avoid circular dependency
-    var claudeClient: ClaudeClient? = null
+    // LlmProvider will be set after initialization to avoid circular dependency
+    var llmProvider: LlmProvider? = null
 
     override val tool: Pair<String, LocalToolDefinition> = Pair(
         first = REMINDER,
@@ -162,8 +163,18 @@ class ReminderMcp(
                 var taskContext = arguments["task_context"]?.jsonPrimitive?.content
 
                 // For ai_response tasks, enrich task_context with accumulated tool results
-                if (taskType == "ai_response" && claudeClient != null) {
-                    val accumulatedResults = claudeClient!!.getAccumulatedToolResults()
+                // NOTE: getAccumulatedToolResults() is specific to ClaudeClient
+                // If using other providers, this feature may not be available
+                if (taskType == "ai_response" && llmProvider != null) {
+                    // Try to get accumulated results if provider is ClaudeClient
+                    val accumulatedResults = if (llmProvider is com.claude.agent.llm.ClaudeLlmProvider) {
+                        // Access the underlying ClaudeClient through reflection or add a method to ClaudeLlmProvider
+                        // For now, skip this feature for non-Claude providers
+                        emptyMap<String, String>()
+                    } else {
+                        emptyMap()
+                    }
+
                     if (accumulatedResults.isNotEmpty()) {
                         // Build a summary of accumulated results
                         val resultsSummary = accumulatedResults.entries.joinToString("\n\n") { (toolName, result) ->

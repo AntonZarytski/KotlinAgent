@@ -119,6 +119,82 @@ fun SettingsPanel(
                 }
             }
 
+            // LLM Provider Selection
+            Div({ style { property("margin-bottom", "24px") } }) {
+                Label(null, {
+                    style {
+                        property("display", "block")
+                        property("font-size", "14px")
+                        property("font-weight", "600")
+                        property("color", "#374151")
+                        property("margin-bottom", "8px")
+                    }
+                }) {
+                    Text("🤖 LLM Провайдер")
+                }
+                Div({
+                    style {
+                        property("display", "flex")
+                        property("gap", "12px")
+                        property("flex-wrap", "wrap")
+                    }
+                }) {
+                    // Local (Qwen) button
+                    Button({
+                        style {
+                            property("flex", "1")
+                            property("padding", "12px 20px")
+                            property("border-radius", "12px")
+                            property("border", if (settings.llmProvider == "local") "2px solid #10b981" else "2px solid #e5e7eb")
+                            property("background", if (settings.llmProvider == "local") "#d1fae5" else "white")
+                            property("color", if (settings.llmProvider == "local") "#065f46" else "#6b7280")
+                            property("font-weight", "600")
+                            property("cursor", "pointer")
+                            property("transition", "all 0.2s")
+                        }
+                        onClick {
+                            onSettingsChange(settings.copy(llmProvider = "local"))
+                        }
+                    }) {
+                        Text("🏠 Local (Qwen)")
+                    }
+
+                    // Claude button
+                    Button({
+                        style {
+                            property("flex", "1")
+                            property("padding", "12px 20px")
+                            property("border-radius", "12px")
+                            property("border", if (settings.llmProvider == "claude") "2px solid #6366f1" else "2px solid #e5e7eb")
+                            property("background", if (settings.llmProvider == "claude") "#e0e7ff" else "white")
+                            property("color", if (settings.llmProvider == "claude") "#4338ca" else "#6b7280")
+                            property("font-weight", "600")
+                            property("cursor", "pointer")
+                            property("transition", "all 0.2s")
+                        }
+                        onClick {
+                            onSettingsChange(settings.copy(llmProvider = "claude"))
+                        }
+                    }) {
+                        Text("☁️ Claude")
+                    }
+                }
+                Div({
+                    style {
+                        property("font-size", "12px")
+                        property("color", "#6b7280")
+                        property("margin-top", "8px")
+                    }
+                }) {
+                    Text(
+                        if (settings.llmProvider == "local")
+                            "Используется локальная модель Qwen через Ollama"
+                        else
+                            "Используется облачная модель Claude от Anthropic"
+                    )
+                }
+            }
+
             // Temperature
             Div({ style { property("margin-bottom", "24px") } }) {
                 Label(null, {

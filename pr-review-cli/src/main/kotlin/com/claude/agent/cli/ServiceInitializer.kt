@@ -1,6 +1,9 @@
 package com.claude.agent.cli
 
 import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.llm.ClaudeLlmProvider
+import com.claude.agent.llm.QwenLlmProvider
+import com.claude.agent.llm.LlmProvider
 import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.llm.mcp.local.*
 import com.claude.agent.llm.mcp.providers.LocalMcpProvider
@@ -40,15 +43,20 @@ class ServiceInitializer {
         val geolocationService = GeolocationService(httpClient)
         val mcpTools = createMCPTools(httpClient, geolocationService)
         val webSocketService = WebSocketService()
-        
+
         val (ragService, ollamaClient) = createRAGServices(options, httpClient)
-        
+
         val claudeClient = createClaudeClient(
             httpClient, mcpTools, webSocketService, ragService, ollamaClient
         )
-        
+
+        // Создаем LLM провайдеры
+        val llmProvider = createLlmProvider(
+            options, httpClient, mcpTools, webSocketService, claudeClient
+        )
+
         val reviewService = PRReviewService(
-            claudeClient = claudeClient,
+            llmProvider = llmProvider,
             mcpTools = mcpTools,
             ragService = ragService,
             ollamaEmbeddingClient = ollamaClient
@@ -152,6 +160,41 @@ class ServiceInitializer {
             ragService = ragService,
             ollamaEmbeddingClient = ollamaClient
         )
+    }
+
+    /**
+     * Создает LLM провайдер на основе опций
+     */
+    private fun createLlmProvider(
+        options: ReviewOptions,
+        httpClient: HttpClient,
+        mcpTools: MCPTools,
+        webSocketService: WebSocketService,
+        claudeClient: ClaudeClient
+    ): LlmProvider {
+        // Создаем провайдеры
+        val claudeLlmProvider = ClaudeLlmProvider(claudeClient)
+        val qwenLlmProvider = QwenLlmProvider(
+            httpClient = httpClient,
+            mcpTools = mcpTools,
+            webSocketService = webSocketService,
+            baseUrl = "http://localhost:11434",
+            modelName = "qwen2.5-coder:7b-instruct"
+        )
+
+        // Выбираем провайдер (по умолчанию Claude для CLI)
+        val provider = when (options.llmProvider?.lowercase()) {
+            "local", "qwen" -> {
+                logger.info("✅ Using Qwen (local) LLM provider")
+                qwenLlmProvider
+            }
+            else -> {
+                logger.info("✅ Using Claude LLM provider")
+                claudeLlmProvider
+            }
+        }
+
+        return provider
     }
 }
 

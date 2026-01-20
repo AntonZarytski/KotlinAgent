@@ -1,13 +1,15 @@
 package com.claude.agent.llm.mcp.local
 
 import com.claude.agent.common.LocalToolDefinition
-import com.claude.agent.llm.ClaudeClient
+import com.claude.agent.llm.LlmProvider
 import com.claude.agent.llm.mcp.Mcp
+import com.claude.agent.models.Message
 import com.claude.agent.models.UserLocation
 import com.claude.agent.service.GooglePlayService
 import com.claude.agent.service.SupportTicketService
 import com.claude.agent.service.LocalAgentManager
 import com.claude.agent.service.ProjectPathService
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -19,7 +21,7 @@ class GooglePlayPublisherMcp(
     private val googlePlayService: GooglePlayService?,
     private val ticketService: SupportTicketService
 ) : Mcp.Local {
-    var claudeClient: ClaudeClient? = null
+    var llmProvider: LlmProvider? = null
     private val logger = LoggerFactory.getLogger(GooglePlayPublisherMcp::class.java)
 
     override val tool: Pair<String, LocalToolDefinition> = Pair(
@@ -361,21 +363,32 @@ class GooglePlayPublisherMcp(
      */
     private suspend fun translateText(text: String, targetLanguage: String): String {
         return try {
-            val prompt = """
-                Translate the following app release notes to $targetLanguage.
-                Keep the same tone and style. Keep it concise and professional.
-                Only return the translation, nothing else.
+            if (llmProvider == null) {
+                logger.warn("LlmProvider not available for translation, using original text")
+                return text
+            }
 
-                Text to translate:
-                $text
-            """.trimIndent()
+            val systemPrompt = "You are a professional translator. Translate app release notes accurately while keeping the same tone and style."
 
-            val response = claudeClient?.sendMessage(
-                userMessage = prompt,
+            val userMessage = Message(
+                role = "user",
+                content = """
+                    Translate the following app release notes to $targetLanguage.
+                    Keep the same tone and style. Keep it concise and professional.
+                    Only return the translation, nothing else.
+
+                    Text to translate:
+                    $text
+                """.trimIndent()
+            )
+
+            val response = llmProvider!!.generate(
+                systemPrompt = systemPrompt,
+                messages = listOf(userMessage),
                 maxTokens = 500
             )
 
-            response?.reply?.trim() ?: text
+            response.reply?.trim() ?: text
 
         } catch (e: Exception) {
             logger.warn("Failed to translate to $targetLanguage: ${e.message}")

@@ -75,7 +75,8 @@ fun main() {
     val logger = LoggerFactory.getLogger("Application")
 
     // Запускаем Compose UI webpack dev server в фоне (если нужно)
-    val autoStartComposeUI = System.getProperty("autoStartComposeUI", "true").toBoolean()
+    // По умолчанию ОТКЛЮЧЕНО, чтобы избежать бесконечной пересборки
+    val autoStartComposeUI = System.getProperty("autoStartComposeUI", "false").toBoolean()
     if (autoStartComposeUI) {
         startComposeUIDevServer(logger)
     }
@@ -269,29 +270,34 @@ private fun startComposeUIDevServer(logger: org.slf4j.Logger) {
     }
 
     try {
+        // УБРАН --continuous флаг для предотвращения бесконечной пересборки
+        // Используем production build для стабильности
         val processBuilder = ProcessBuilder()
-            .command(gradlewFile.absolutePath, ":compose-ui:jsBrowserDevelopmentRun", "--continuous")
+            .command(gradlewFile.absolutePath, ":compose-ui:jsBrowserProductionWebpack")
             .directory(projectRoot)
-            .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-            .redirectError(ProcessBuilder.Redirect.INHERIT)
+            .redirectOutput(File(projectRoot, "app.log").apply {
+                parentFile?.mkdirs()
+            })
+            .redirectError(ProcessBuilder.Redirect.appendTo(File(projectRoot, "app.log")))
 
-        logger.info("🚀 Запуск Compose UI webpack dev server...")
+        logger.info("🚀 Сборка Compose UI (production)...")
         logger.info("   Команда: ${processBuilder.command().joinToString(" ")}")
+        logger.info("   Логи: app.log")
 
         val process = processBuilder.start()
 
-        // Убиваем процесс при завершении JVM
-        Runtime.getRuntime().addShutdownHook(Thread {
-            logger.info("Остановка Compose UI webpack dev server...")
-            process.destroy()
-            process.waitFor()
-        })
+        // Ждем завершения сборки
+        val exitCode = process.waitFor()
 
-        logger.info("✅ Compose UI webpack dev server запущен (PID: ${process.pid()})")
-        logger.info("   Webpack будет доступен на http://localhost:8080")
+        if (exitCode == 0) {
+            logger.info("✅ Compose UI успешно собран")
+        } else {
+            logger.error("❌ Ошибка сборки Compose UI (exit code: $exitCode)")
+            logger.error("   Проверьте app.log для деталей")
+        }
 
     } catch (e: Exception) {
-        logger.error("❌ Не удалось запустить Compose UI webpack dev server: ${e.message}", e)
+        logger.error("❌ Не удалось собрать Compose UI: ${e.message}", e)
     }
 }
 
@@ -398,21 +404,75 @@ fun Application.module() {
     // Устанавливаем зависимости для HelpMcp после создания providers
     helpMcp.localMcpProvider = localMcpProvider
     helpMcp.remoteTools = remoteMcpProvider.getAllServers()
-    val claudeClient = ClaudeClient(
+
+    // === Инициализация LLM провайдеров ===
+
+    // Claude провайдер - создаем только если есть API ключ
+    val claudeClient: ClaudeClient?
+    val claudeLlmProvider: com.claude.agent.llm.LlmProvider?
+
+    if (AppConfig.anthropicApiKeyOrNull != null) {
+        logger.info("✅ Initializing Claude provider...")
+        claudeClient = ClaudeClient(
+            httpClient = httpClient,
+            mcpTools = mcpTools,
+            webSocketService = webSocketService,
+            tokenMetricsService = tokenMetricsService,
+            toolsFilterService = toolsFilterService,
+            ragService = ragService,
+            ollamaEmbeddingClient = ollamaEmbeddingClient
+        )
+        claudeLlmProvider = com.claude.agent.llm.ClaudeLlmProvider(claudeClient)
+    } else {
+        logger.warn("⚠️ Claude provider disabled (ANTHROPIC_API_KEY not set)")
+        claudeClient = null
+        claudeLlmProvider = null
+    }
+
+    // Qwen провайдер - всегда доступен
+    logger.info("✅ Initializing Qwen (local) provider...")
+    val qwenLlmProvider = com.claude.agent.llm.QwenLlmProvider(
         httpClient = httpClient,
         mcpTools = mcpTools,
         webSocketService = webSocketService,
-        tokenMetricsService = tokenMetricsService,
-        toolsFilterService = toolsFilterService,
-        ragService = ragService,
-        ollamaEmbeddingClient = ollamaEmbeddingClient
+        baseUrl = AppConfig.ollamaUrl,
+        modelName = AppConfig.ollamaModel
     )
-    val historyCompressor = HistoryCompressor(claudeClient, tokenMetricsService)
 
-    reminderService.claudeClient = claudeClient
+    // Выбираем провайдер по умолчанию из конфигурации
+    val defaultLlmProvider = when (AppConfig.llmProvider.lowercase()) {
+        "claude" -> {
+            if (claudeLlmProvider != null) {
+                logger.info("✅ Default LLM Provider: Claude (Anthropic)")
+                claudeLlmProvider
+            } else {
+                logger.warn("⚠️ Claude provider requested but not available, falling back to Qwen")
+                qwenLlmProvider
+            }
+        }
+        "local" -> {
+            logger.info("✅ Default LLM Provider: Qwen (Ollama)")
+            qwenLlmProvider
+        }
+        else -> {
+            logger.warn("⚠️ Unknown LLM provider '${AppConfig.llmProvider}', using Local (Qwen)")
+            qwenLlmProvider
+        }
+    }
+
+    // Создаем фабрику провайдеров
+    val llmProviderFactory = com.claude.agent.llm.LlmProviderFactory(
+        claudeLlmProvider = claudeLlmProvider,
+        qwenLlmProvider = qwenLlmProvider,
+        defaultProvider = defaultLlmProvider
+    )
+
+    val historyCompressor = HistoryCompressor(defaultLlmProvider, tokenMetricsService)
+
+    reminderService.llmProvider = defaultLlmProvider
     reminderService.mcpTools = mcpTools
-    reminderMcp.claudeClient = claudeClient
-    googlePlayPublisherMcp.claudeClient = claudeClient
+    reminderMcp.llmProvider = defaultLlmProvider
+    googlePlayPublisherMcp.llmProvider = defaultLlmProvider
     reminderService.startScheduler()
 
     logger.info("=== Сервисы инициализированы ===")
@@ -505,7 +565,7 @@ fun Application.module() {
 
         // Chat endpoints
         chatRoutes(
-            claudeClient = claudeClient,
+            llmProviderFactory = llmProviderFactory,
             mcpTools = mcpTools,
             historyCompressor = historyCompressor,
             repository = repository
@@ -534,7 +594,7 @@ fun Application.module() {
 
         // PR Review endpoints
         val prReviewService = com.claude.agent.service.PRReviewService(
-            claudeClient = claudeClient,
+            llmProvider = defaultLlmProvider,
             mcpTools = mcpTools,
             ragService = ragService,
             ollamaEmbeddingClient = ollamaEmbeddingClient,

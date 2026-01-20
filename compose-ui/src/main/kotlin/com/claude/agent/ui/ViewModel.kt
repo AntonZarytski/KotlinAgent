@@ -40,7 +40,7 @@ class ChatViewModel(private val apiClient: ClaudeApiClient) {
         messages = listOf(
             Message(
                 role = "assistant",
-                content = "Привет! Я твой локальный Claude-агент. Нажми 💬 для истории чатов. Нажми ⚙️ для настроек. Спроси что-нибудь 🙂"
+                content = "Привет! Я твой локальный агент. Нажми 💬 для истории чатов. Нажми ⚙️ для настроек. Спроси что-нибудь 🙂"
             )
         )
     }

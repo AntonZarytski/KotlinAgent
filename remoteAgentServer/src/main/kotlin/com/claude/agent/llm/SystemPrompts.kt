@@ -1,15 +1,6 @@
 package com.claude.agent.llm
 
 import com.claude.agent.config.OutputFormat
-import com.claude.agent.llm.mcp.ACTION_PLANNER
-import com.claude.agent.llm.mcp.AIR_TICKETS
-import com.claude.agent.llm.mcp.ANDROID_STUDIO_MCP
-import com.claude.agent.llm.mcp.CHAT_SUMMARY
-import com.claude.agent.llm.mcp.GIT_REPOSITORY
-import com.claude.agent.llm.mcp.PROJECT_HELP
-import com.claude.agent.llm.mcp.REMINDER
-import com.claude.agent.llm.mcp.SOLAR
-import com.claude.agent.llm.mcp.WEATHER
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
@@ -19,7 +10,6 @@ import java.time.format.DateTimeFormatter
  * Аналог prompts.py из Python-версии.
  * Использует Kotlin object и константы для организации промптов.
  */
-
 object SystemPrompts {
 
     /**
@@ -110,202 +100,71 @@ object SystemPrompts {
 - Используй правильную XML структуру с закрывающими тегами."""
 
     /**
-     * Генерирует системный промпт для Claude API.
+     * Генерирует системный промпт для LLM API.
      *
      * @param outputFormat Формат вывода ('default', 'json', 'xml')
      * @param specMode Режим сбора уточняющих данных (true/false)
+     * @param llmType Тип LLM модели ('claude' или 'qwen') для оптимизации промпта
      * @return Склеенный системный промпт
      */
-    fun getSystemPrompt(outputFormat: String, enabledTools: List<String>, specMode: Boolean = false, isRagEnabled: Boolean): String {
+    fun getSystemPrompt(
+        outputFormat: String,
+        enabledTools: List<String>,
+        specMode: Boolean = false,
+        isRagEnabled: Boolean,
+        llmType: String = "claude"
+    ): String {
+        // Получаем провайдеры для данного типа LLM
+        val systemPromptProvider = PromptProviderFactory.createSystemPromptProvider(llmType)
+        val toolDescriptionProvider = PromptProviderFactory.createToolDescriptionProvider(llmType)
+        
         // Получаем текущее время с часовым поясом
         val currentTime = ZonedDateTime.now()
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
         val formattedTime = currentTime.format(formatter)
 
-        // Выбираем базовый промпт
-        var basePrompt = if (specMode) SPEC_MODE else DEFAULT_MODE
+        // Выбираем базовый промпт через провайдер
+        val baseModePrompt = if (specMode) {
+            systemPromptProvider.getSpecModePrompt()
+        } else {
+            systemPromptProvider.getDefaultModePrompt()
+        }
 
         // Добавляем текущее время
-        basePrompt = """Текущее время: $formattedTime
+        var basePrompt = """Текущее время: $formattedTime
 
-        $basePrompt"""
+$baseModePrompt"""
+
+        // Добавляем описания инструментов
         if (enabledTools.isNotEmpty()) {
-            var toolsPrompt = "Доступны инструменты:"
-            enabledTools.forEach { toolName ->
-                when (toolName) {
-                    ACTION_PLANNER -> toolsPrompt += "\n - $ACTION_PLANNER - планировщик действий для выполнения задачи c возможностью вызова mcp последовательно"
-                    WEATHER -> toolsPrompt += "\n-$WEATHER(lat, lon) - текущая погода"
-                    SOLAR -> toolsPrompt += "\n- $SOLAR(lat, lon) - солнечная активность, полярные сияния"
-                    REMINDER -> toolsPrompt += """Если пользователь просит:
-                                                    - напомнить
-                                                    - создать напоминание
-                                                    - уведомить в будущем
-                                                    
-                                                    Ты обязан вызвать MCP tool $REMINDER с action="add"."""
-                    CHAT_SUMMARY -> toolsPrompt += "\n- $CHAT_SUMMARY - получить краткое summary текущего чата"
-                    AIR_TICKETS -> toolsPrompt += "\n- $AIR_TICKETS remote MCP - Позволяет быстро подобрать лучшие варианты перелётов с учётом маршрута, дат (включая гибкость ±3 дня), типа поездки, количества пассажиров и класса обслуживания."
-                    ANDROID_STUDIO_MCP -> toolsPrompt += "\n- $ANDROID_STUDIO_MCP remote MCP - Позволяет управлять эмулятором Android Studio и выполняйте команды ADB на удаленной машине разработчика."
-                    GIT_REPOSITORY -> toolsPrompt += """- $GIT_REPOSITORY - работа с git-репозиторием:
-                      * get_current_branch - текущая ветка
-                      * get_status - измененные файлы в текущей ветке
-                      * get_recent_commits - последние коммиты
-                      * get_diff - изменения в коде
-                      * get_branches - список всех веток
-                      * get_file_history - история изменений файла
-                      * list_files_in_branch - список файлов в любой ветке (с фильтром по расширению)
-                      * show_file_from_branch - показать содержимое файла из любой ветки
-                      * compare_branches - сравнить две ветки (список измененных файлов)
-                      * get_branch_commits - коммиты в ветке (которых нет в main)
+            basePrompt += toolDescriptionProvider.getToolsSectionHeader()
 
-                      ВАЖНО: Можно работать с любой веткой БЕЗ переключения (checkout)!
-                      Примеры:
-                      - Список .kt файлов в ветке day_12: list_files_in_branch(branch="origin/day_12", file_extension=".kt")
-                      - Содержимое файла из ветки: show_file_from_branch(branch="origin/day_12", file_path="path/to/file.kt")
-                      - Сравнить ветки: compare_branches(branch="origin/day_12", target_branch="main")
-                      """
-                    PROJECT_HELP -> toolsPrompt += """$PROJECT_HELP - 
-                             Пользователь может использовать команду /help для быстрого поиска информации в документации проекта.
-                             Формат: /help [вопрос](опционально)
-                             
-                             Примеры:
-                             - /help
-                             - /help Как работает RAG?
-                             - /help Как создать MCP tool?
-                             - /help Правила стиля кода
-                             
-                             Эта команда автоматически использует RAG для поиска релевантной информации.
-                             
-                             ИНСТРУМЕНТ project_help:
-                             При использовании инструмента project_help всегда давай конкретные ответы, только касающиеся вопроса, на основе найденного контекста.
-                             Если пользователь вводит только /help без вопроса, то выводи подробную информацию по проекту.
-                            """
-                }
+            for (toolName in enabledTools) {
+                val description = toolDescriptionProvider.getToolDescription(toolName)
+                basePrompt += "\n$description"
             }
-            toolsPrompt += """
 
-            КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА ИСПОЛЬЗОВАНИЯ ИНСТРУМЕНТОВ:
-
-            1. ЭФФЕКТИВНОСТЬ:
-               - Выполняй задачи ПОСЛЕДОВАТЕЛЬНО и ЦЕЛЕНАПРАВЛЕННО
-               - НЕ зацикливайся на одном действии (например, просмотр директорий)
-               - Если просмотрел 2-3 уровня директорий - ПЕРЕХОДИ к чтению файлов
-               - Если задача состоит из нескольких частей - выполни ВСЕ части
-
-            2. ПЛАНИРОВАНИЕ:
-               - Для сложных задач СНАЧАЛА используй $ACTION_PLANNER
-               - Составь план из 3-5 конкретных шагов
-               - Затем выполняй шаги ПОСЛЕДОВАТЕЛЬНО
-
-            3. РАБОТА С ФАЙЛАМИ (android_studio):
-               - browse_files: используй для БЫСТРОГО обзора (1-2 уровня)
-               - read_file: используй для ЧТЕНИЯ содержимого файлов
-               - НЕ просматривай каждую папку рекурсивно - это неэффективно
-               - Если нужно "показать проект" - прочитай ключевые файлы (MainActivity, build.gradle, AndroidManifest.xml)
-
-            4. ПУБЛИКАЦИЯ ANDROID ПРИЛОЖЕНИЙ (КРИТИЧЕСКИ ВАЖНО):
-               Когда пользователь просит опубликовать/собрать/выпустить Android приложение:
-
-               ЗАПРЕЩЕНО:
-               - НЕ анализируй код проекта (MainActivity, build.gradle и т.д.)
-               - НЕ просматривай структуру проекта
-               - НЕ читай файлы проекта
-               - НЕ задавай вопросы о коде
-
-               ОБЯЗАТЕЛЬНО (ВЫПОЛНЯЙ ПОСЛЕДОВАТЕЛЬНО С ПРОВЕРКОЙ РЕЗУЛЬТАТА):
-
-               Шаг 1: Установить путь к проекту (если не установлен)
-                  - Используй android_studio с action="set_project_path"
-                  - Путь должен быть ПОЛНЫМ (например: /Users/anton/StudioProjects/SecretChat)
-                  - ПРОВЕРЬ результат: если status != "success" - ОСТАНОВИ выполнение и сообщи об ошибке
-
-               Шаг 2: Собрать AAB файл
-                  - Используй android_studio с action="gradle_build" и task="bundleRelease"
-                  - Дождись результата (это может занять несколько минут)
-                  - ПРОВЕРЬ результат: если status != "success" - ОСТАНОВИ выполнение и сообщи об ошибке
-
-               Шаг 3: Опубликовать в Google Play
-                  - Используй google_play_publisher с action="publish_aab"
-                  - Укажи ВСЕ параметры: package_name, aab_file_path, version_code, version_name, release_notes, track
-                  - AAB файл обычно находится в: <project_path>/app/release/app-release.aab
-                  - ПРОВЕРЬ результат: если success != true - сообщи об ошибке с деталями
-
-               КРИТИЧЕСКИ ВАЖНО:
-               - ПРОВЕРЯЙ результат КАЖДОГО шага перед переходом к следующему
-               - Если ЛЮБОЙ шаг не удался - ОСТАНОВИ выполнение и сообщи пользователю об ошибке
-               - НЕ продолжай публикацию если set_project_path или gradle_build не удались
-               - Путь к проекту должен быть ПОЛНЫМ (начинаться с "/" или "C:\")
-
-               ПРИМЕР ПРАВИЛЬНОГО WORKFLOW:
-               Пользователь: "опубликуй SecretChat в GooglePlay"
-
-               1. set_project_path с project_path="/Users/anton/StudioProjects/SecretChat"
-                  → Проверка: status == "success" ✅ → продолжаем
-
-               2. gradle_build с task="bundleRelease"
-                  → Проверка: status == "success" ✅ → продолжаем
-
-               3. google_play_publisher с action="publish_aab"
-                  → Проверка: success == true ✅ → готово!
-
-               НЕ ДЕЛАЙ НИЧЕГО ЛИШНЕГО! Просто выполни эти 3 шага последовательно с проверкой результата.
-
-            5. ЗАВЕРШЕНИЕ ЗАДАЧ:
-               - Если пользователь просит "сделать X и Y" - сделай ОБА действия
-               - НЕ останавливайся на половине задачи
-               - Сообщи о завершении ВСЕХ частей задачи
-
-            6. ДАННЫЕ:
-               - Используй инструменты для актуальных данных о погоде/солнце/авиабилетах
-               - Не придумывай данные — только через инструменты
-               - Если нет координат — попроси город
-            """
-            basePrompt += "\n$toolsPrompt"
+            // Добавляем правила использования инструментов
+            basePrompt += systemPromptProvider.getToolUsageRules()
         }
 
+        // Добавляем инструкции по RAG, если включен
         if (isRagEnabled) {
-            val ragPrompt = """
-
-ВАЖНО: РАБОТА С КОНТЕКСТОМ ИЗ ДОКУМЕНТАЦИИ (RAG):
-
-Вам будет предоставлен контекст из документации с указанием источников.
-
-ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
-1. ВСЕГДА указывайте источники информации в своем ответе
-2. Используйте формат: "Согласно [название документа]..." или "В документации [файл]..."
-3. В конце ответа ОБЯЗАТЕЛЬНО добавьте секцию "📚 Источники:" со списком использованных документов
-4. Если контекст не содержит ответа — скажите «В моей базе знаний нет таких данных»
-
-ФОРМАТ ОТВЕТА С ИСТОЧНИКАМИ:
-[Ваш ответ на основе контекста...]
-
-📚 Источники:
-- [название документа 1]
-- [название документа 2]
-
-Это критически важно для прозрачности и проверяемости информации!
-            """.trimIndent()
-            basePrompt += "\n$ragPrompt"
+            basePrompt += systemPromptProvider.getRagInstructions()
         }
 
-        // Выбираем инструкции по формату
-        val formatInstructions = when (outputFormat) {
-            OutputFormat.JSON -> FORMAT_JSON
-            OutputFormat.XML -> FORMAT_XML
+        // Добавляем инструкции по формату вывода
+        val formatPrompt = when (outputFormat.lowercase()) {
+            "json" -> FORMAT_JSON
+            "xml" -> FORMAT_XML
             else -> ""
         }
 
-        // Склеиваем промпты
-        return if (formatInstructions.isNotBlank()) {
-            "$basePrompt\n$formatInstructions"
+        return if (formatPrompt.isNotEmpty()) {
+            "$basePrompt\n\n$formatPrompt"
         } else {
             basePrompt
         }
     }
-
-    /**
-     * Возвращает чистое сообщение пользователя (без дополнительных инструкций).
-     */
-    fun getUserMessage(userMessage: String): String {
-        return userMessage.trim()
-    }
 }
+

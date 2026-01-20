@@ -242,7 +242,7 @@ fun LoadingIndicator() {
         }
 
         Div({ classes("message", "assistant") }) {
-            Text("Claude думает...")
+            Text("Модель думает...")
         }
     }
 }

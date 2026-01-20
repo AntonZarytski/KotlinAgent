@@ -65,8 +65,6 @@ class ClaudeClient(
         private val accumulatedToolResults = ThreadLocal<MutableMap<String, String>>()
     }
 
-    val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
-
     /**
      * Get accumulated tool results for the current conversation turn.
      * This is used by tools (like reminder) that need access to results from previous tool calls.
@@ -128,15 +126,19 @@ class ClaudeClient(
                 null
             }
 
-            // Формируем системный промпт
-            val systemPrompt = SystemPrompts.getSystemPrompt(outputFormat = outputFormat, specMode = specMode, enabledTools = enabledTools, isRagEnabled = isRagEnabled)
-
-            val cleanUserMessage = SystemPrompts.getUserMessage(userMessage)
+            // Формируем системный промпт (для Claude используем подробные описания)
+            val systemPrompt = SystemPrompts.getSystemPrompt(
+                outputFormat = outputFormat,
+                specMode = specMode,
+                enabledTools = enabledTools,
+                isRagEnabled = isRagEnabled,
+                llmType = "claude"
+            )
 
             // Формируем массив сообщений с историей
             val messages = buildMessages(
                 history = conversationHistory,
-                userMessage = cleanUserMessage,
+                userMessage = userMessage,
                 ragContext = ragContext,
                 fileContext = fileContext
             )
@@ -146,7 +148,7 @@ class ClaudeClient(
             val remoteMcpParams = mcpTools.getRemoteMCP()
 
             // Получаем инструменты с динамической фильтрацией
-            val localMcpParams = getFilteredTools(enabledTools, remoteMcpParams, cleanUserMessage)
+            val localMcpParams = getFilteredTools(enabledTools, remoteMcpParams, userMessage)
 
             // Формируем запрос с поддержкой prompt caching
             val requestBody = buildAnthropicRequest(

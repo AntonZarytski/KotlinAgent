@@ -778,7 +778,8 @@ private suspend fun sendMessage(
                 rag_top_k = settings.ragTopK,
                 rag_min_similarity = settings.ragMinSimilarity.toDouble(),
                 rag_filter_enabled = settings.ragFilterEnabled,
-                selected_files = fullPathFiles
+                selected_files = fullPathFiles,
+                llm_provider = settings.llmProvider  // 🆕 Передаем выбранный провайдер
             )
         )
 
