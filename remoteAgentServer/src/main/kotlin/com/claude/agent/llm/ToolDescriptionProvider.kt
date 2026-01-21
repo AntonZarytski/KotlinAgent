@@ -178,7 +178,19 @@ class QwenToolDescriptionProvider : ToolDescriptionProvider {
             REMINDER -> "✅ $REMINDER - создать напоминание (text, due_at, recurrence_type)"
             CHAT_SUMMARY -> "✅ $CHAT_SUMMARY - резюме чата"
             AIR_TICKETS -> "✅ $AIR_TICKETS - поиск авиабилетов"
-            ANDROID_STUDIO_MCP -> "✅ $ANDROID_STUDIO_MCP - Android Studio/ADB (set_project_path, gradle_build, browse_files, read_file)"
+            ANDROID_STUDIO_MCP -> """✅ $ANDROID_STUDIO_MCP - Android Studio/ADB/Gradle
+Действия (параметр action):
+  • list_emulators - список эмуляторов
+  • start_emulator - запустить (avd_name)
+  • stop_emulator - остановить
+  • gradle_build - собрать (build_variant)
+  • browse_files - файлы (directory_path)
+  • read_file - читать (file_path)
+
+ПРИМЕРЫ ВЫЗОВА:
+{"name": "android_studio_mcp", "arguments": {"action": "list_emulators"}}
+{"name": "android_studio_mcp", "arguments": {"action": "start_emulator", "avd_name": "Pixel_5_API_30"}}
+{"name": "android_studio_mcp", "arguments": {"action": "gradle_build", "build_variant": "debug"}}"""
             GIT_REPOSITORY -> "✅ $GIT_REPOSITORY - git (get_status, get_diff, list_files_in_branch, show_file_from_branch)"
             PROJECT_HELP -> "✅ $PROJECT_HELP - помощь по проекту"
             else -> "✅ $toolName"

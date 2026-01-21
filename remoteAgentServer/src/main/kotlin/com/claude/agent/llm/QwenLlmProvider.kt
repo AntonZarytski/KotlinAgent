@@ -12,6 +12,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
 
@@ -415,6 +416,10 @@ class QwenLlmProvider(
         var iteration = 0
         var totalTokens = 0
 
+        // Счетчик повторяющихся ошибок для предотвращения бесконечных циклов
+        val errorHistory = mutableListOf<String>()
+        val maxConsecutiveErrors = 3
+
         while (iteration < MAX_TOOL_ITERATIONS) {
             iteration++
 
@@ -455,22 +460,35 @@ class QwenLlmProvider(
 
             // Если tool_calls пустой, пытаемся распарсить из текста (для Qwen)
             if (toolCalls.isNullOrEmpty()) {
+                logger.info("⚠️ No tool_calls from API, attempting to parse from content")
+                logger.debug("Content to parse: ${assistantMessage.content}")
+
                 // Проверяем теги <tool_call>
                 if (assistantMessage.content.contains("<tool_call>")) {
                     logger.info("Parsing tool calls from <tool_call> tags in response")
                     toolCalls = parseToolCallsFromText(assistantMessage.content)
+                    logger.info("Parsed ${toolCalls?.size ?: 0} tool calls from <tool_call> tags")
                 }
                 // Проверяем, является ли весь ответ JSON с вызовом инструмента
                 else if (assistantMessage.content.trim().startsWith("{") &&
                          assistantMessage.content.trim().endsWith("}")) {
                     logger.info("Attempting to parse response as pure JSON tool call")
                     toolCalls = parseJsonToolCall(assistantMessage.content)
+                    logger.info("Parsed ${toolCalls?.size ?: 0} tool calls from pure JSON")
                 }
                 // Проверяем JSON в markdown блоке ```json
                 else if (assistantMessage.content.contains("```json")) {
                     logger.info("Attempting to parse tool call from markdown JSON block")
                     toolCalls = parseJsonFromMarkdown(assistantMessage.content)
+                    logger.info("Parsed ${toolCalls?.size ?: 0} tool calls from markdown JSON")
                 }
+                else {
+                    logger.warn("⚠️ Content does not match any known tool call format")
+                    logger.warn("   Content starts with: ${assistantMessage.content.take(100)}")
+                    logger.warn("   Content ends with: ${assistantMessage.content.takeLast(100)}")
+                }
+            } else {
+                logger.info("✅ Got ${toolCalls.size} tool calls from API")
             }
 
             if (toolCalls.isNullOrEmpty()) {
@@ -479,6 +497,31 @@ class QwenLlmProvider(
                 if (cleanedResponse != assistantMessage.content) {
                     logger.info("Extracted text from JSON response")
                     return Triple(cleanedResponse, totalTokens, intermediateMessages)
+                }
+
+                // Отправляем промежуточное сообщение через WebSocket
+                if (sessionId != null && showIntermediateMessages) {
+                    try {
+                        val messageData = buildJsonObject {
+                            put("role", "assistant")
+                            put("content", assistantMessage.content)
+                            put("is_intermediate", false)
+                            put("iteration", iteration)
+                            put("timestamp", System.currentTimeMillis())
+                        }
+
+                        webSocketService.broadcastToSession(
+                            sessionId = sessionId,
+                            message = WebSocketMessage(
+                                type = "streaming_text",
+                                sessionId = sessionId,
+                                data = Json.encodeToString(messageData)
+                            )
+                        )
+                        logger.info("📡 Финальный ответ отправлен через WebSocket (iteration $iteration)")
+                    } catch (e: Exception) {
+                        logger.warn("Не удалось отправить финальный ответ через WebSocket: ${e.message}")
+                    }
                 }
 
                 // Финальный ответ без tool calls
@@ -494,23 +537,68 @@ class QwenLlmProvider(
 
             // Выполняем все tool calls
             for ((index, toolCall) in toolCalls.withIndex()) {
-                val toolName = toolCall.function.name
-                val toolArgs = toolCall.function.arguments
+                var toolName = toolCall.function.name
+                var toolArgs = toolCall.function.arguments
 
                 logger.info("🔧 [$iteration/$MAX_TOOL_ITERATIONS] Tool call #${index + 1}: $toolName")
 
-                val result = try {
-                    mcpTools.callLocalTool(toolName, toolArgs, clientIp, userLocation, sessionId)
-                } catch (e: Exception) {
-                    logger.error("Error executing $toolName: ${e.message}")
+                // Пытаемся автоматически исправить неправильный вызов
+                val fixed = fixToolCall(toolName, toolArgs)
+                if (fixed != null) {
+                    toolName = fixed.first
+                    toolArgs = fixed.second
+                    logger.info("✅ Tool call auto-fixed to: $toolName")
+                }
 
-                    // Проверяем, не пытается ли модель вызвать похожий инструмент
-                    val suggestion = suggestCorrectToolName(toolName, enabledTools)
-                    if (suggestion != null) {
-                        logger.warn("⚠️ Tool '$toolName' not found. Did you mean '$suggestion'?")
-                        """{"error": "Tool '$toolName' not found. Did you mean '$suggestion'? Use EXACT tool name: $suggestion"}"""
-                    } else {
-                        """{"error": "${e.message}"}"""
+                // Валидация обязательных параметров для android_studio_mcp
+                val action = toolArgs["action"]?.jsonPrimitive?.contentOrNull
+                val validationError = if (toolName == "android_studio_mcp" && action != null) {
+                    validateRequiredParameters(toolName, action, toolArgs)
+                } else null
+
+                val result = if (validationError != null) {
+                    // Параметры отсутствуют - прерываем цикл и просим пользователя предоставить их
+                    logger.warn("⚠️ Validation failed: $validationError")
+                    errorHistory.add("validation_error:$action")
+
+                    // Проверяем, не повторяется ли эта ошибка
+                    if (errorHistory.takeLast(maxConsecutiveErrors).all { it.startsWith("validation_error:$action") }) {
+                        logger.error("❌ Same validation error repeated $maxConsecutiveErrors times. Breaking loop.")
+                        // Возвращаем финальный ответ с просьбой к пользователю
+                        return Triple(
+                            "Для выполнения действия '$action' требуется дополнительная информация: $validationError\n\nПожалуйста, предоставьте необходимые данные.",
+                            totalTokens,
+                            intermediateMessages
+                        )
+                    }
+
+                    """{"error": "$validationError", "status": "missing_parameters"}"""
+                } else {
+                    try {
+                        mcpTools.callLocalTool(toolName, toolArgs, clientIp, userLocation, sessionId)
+                    } catch (e: Exception) {
+                        logger.error("Error executing $toolName: ${e.message}")
+                        val errorKey = "tool_error:$toolName:${e.message}"
+                        errorHistory.add(errorKey)
+
+                        // Проверяем повторяющиеся ошибки
+                        if (errorHistory.takeLast(maxConsecutiveErrors).all { it == errorKey }) {
+                            logger.error("❌ Same error repeated $maxConsecutiveErrors times. Breaking loop.")
+                            return Triple(
+                                "Не удалось выполнить операцию '$toolName' после $maxConsecutiveErrors попыток. Ошибка: ${e.message}\n\nПожалуйста, проверьте параметры или попробуйте другой подход.",
+                                totalTokens,
+                                intermediateMessages
+                            )
+                        }
+
+                        // Проверяем, не пытается ли модель вызвать похожий инструмент
+                        val suggestion = suggestCorrectToolName(toolName, enabledTools)
+                        if (suggestion != null) {
+                            logger.warn("⚠️ Tool '$toolName' not found. Did you mean '$suggestion'?")
+                            """{"error": "Tool '$toolName' not found. Did you mean '$suggestion'? Use EXACT tool name: $suggestion"}"""
+                        } else {
+                            """{"error": "${e.message}"}"""
+                        }
                     }
                 }
 
@@ -536,6 +624,72 @@ class QwenLlmProvider(
             totalTokens,
             intermediateMessages
         )
+    }
+
+    /**
+     * Проверяет обязательные параметры для инструмента
+     * Возвращает сообщение об ошибке если параметры отсутствуют или пусты, иначе null
+     */
+    private fun validateRequiredParameters(toolName: String, action: String?, arguments: JsonObject): String? {
+        // Определяем обязательные параметры для каждого действия android_studio_mcp
+        val requiredParams = when (action) {
+            "start_emulator" -> listOf("avd_name")
+            "read_file" -> listOf("file_path")
+            "browse_files" -> listOf("directory_path")
+            "gradle_build" -> emptyList() // build_variant опционален
+            "install_apk" -> listOf("apk_path")
+            "run_app" -> listOf("package_name")
+            "adb_shell" -> listOf("command")
+            "read_file_lines" -> listOf("file_path")
+            "find_files" -> listOf("pattern")
+            "save_log" -> listOf("log_content")
+            "set_project_path" -> listOf("project_path")
+            else -> emptyList()
+        }
+
+        // Проверяем каждый обязательный параметр
+        for (param in requiredParams) {
+            val value = arguments[param]?.jsonPrimitive?.contentOrNull
+            if (value.isNullOrBlank()) {
+                logger.warn("⚠️ Missing or empty required parameter '$param' for action '$action'")
+                return "Missing required parameter '$param' for action '$action'. Please provide a valid value."
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Автоматически исправляет неправильные вызовы инструментов
+     * Возвращает пару (исправленное имя, исправленные аргументы) или null если исправление невозможно
+     */
+    private fun fixToolCall(toolName: String, arguments: JsonObject): Pair<String, JsonObject>? {
+        // Карта действий android_studio_mcp, которые модель может вызывать напрямую
+        val androidStudioActions = setOf(
+            "read_file", "browse_files", "start_emulator", "stop_emulator",
+            "list_emulators", "gradle_build", "gradle_install_run",
+            "install_apk", "run_app", "adb_shell", "screenshot",
+            "logcat", "logcat_clear", "read_file_lines", "find_files", "save_log",
+            "set_project_path", "get_project_path", "get_file_tree"
+        )
+
+        // Если модель вызвала действие напрямую, преобразуем в android_studio_mcp
+        if (toolName in androidStudioActions) {
+            logger.info("🔧 Auto-fixing tool call: $toolName -> android_studio_mcp with action=$toolName")
+
+            // Создаем новые аргументы с action
+            val fixedArguments = buildJsonObject {
+                put("action", toolName)
+                // Копируем все остальные аргументы
+                arguments.forEach { (key, value) ->
+                    put(key, value)
+                }
+            }
+
+            return Pair("android_studio_mcp", fixedArguments)
+        }
+
+        return null
     }
 
     /**

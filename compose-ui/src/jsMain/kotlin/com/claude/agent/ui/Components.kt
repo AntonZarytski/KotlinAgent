@@ -90,10 +90,11 @@ fun ChatMessages(
     messages: List<Message>,
     isLoading: Boolean,
     showTokenCount: Boolean,
-    streamingText: String? = null
+    streamingText: String? = null,
+    toolResults: List<ToolResultData> = emptyList()
 ) {
     // Auto-scroll to bottom when messages change or streaming text updates
-    LaunchedEffect(messages.size, isLoading, streamingText) {
+    LaunchedEffect(messages.size, isLoading, streamingText, toolResults.size) {
         document.getElementById("chat")?.let { chat ->
             chat.scrollTop = chat.scrollHeight.toDouble()
         }
@@ -102,6 +103,13 @@ fun ChatMessages(
     Div({ classes("chat"); id("chat") }) {
         messages.forEach { message ->
             MessageItem(message, showTokenCount)
+        }
+
+        // Show tool results (intermediate tool execution messages)
+        if (toolResults.isNotEmpty()) {
+            toolResults.forEach { toolResult ->
+                ToolResultItem(toolResult)
+            }
         }
 
         // Show streaming message (intermediate text while thinking)
@@ -181,6 +189,48 @@ fun MessageItem(message: Message, showTokenCount: Boolean) {
         if (isUser) {
             Div({ classes("avatar", "user") }) {
                 Text("👤")
+            }
+        }
+    }
+}
+
+@Composable
+fun ToolResultItem(toolResult: ToolResultData) {
+    Div({ classes("message-wrapper") }) {
+        Div({ classes("avatar", "assistant") }) {
+            Text("🔧")
+        }
+
+        Div({ classes("message-container") }) {
+            Div({
+                classes("message", "assistant")
+                style {
+                    // Особый стиль для tool results
+                    property("background", "linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)")
+                    property("border-left", "4px solid #3b82f6")
+                    property("font-size", "13px")
+                }
+            }) {
+                Div({
+                    style {
+                        property("font-size", "11px")
+                        property("color", "#1e40af")
+                        property("font-weight", "600")
+                        property("margin-bottom", "8px")
+                        property("text-transform", "uppercase")
+                        property("letter-spacing", "0.5px")
+                    }
+                }) {
+                    Text("🔧 Выполнение: ${toolResult.tool_name}")
+                }
+
+                Div({
+                    classes("markdown-content")
+                    ref { element ->
+                        element.innerHTML = Utils.parseMarkdown(toolResult.tool_result.take(500))
+                        onDispose { }
+                    }
+                })
             }
         }
     }

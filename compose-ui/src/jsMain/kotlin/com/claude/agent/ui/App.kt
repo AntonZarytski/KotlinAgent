@@ -39,6 +39,7 @@ fun ClaudeChatApp() {
     // Streaming state for real-time message updates
     var streamingText by remember { mutableStateOf<String?>(null) }
     var streamingIteration by remember { mutableStateOf(0) }
+    var toolResults by remember { mutableStateOf<List<ToolResultData>>(emptyList()) }
 
     // File tree state
     var fileTree by remember { mutableStateOf<FileTreeNode?>(null) }
@@ -92,13 +93,16 @@ fun ClaudeChatApp() {
             },
             onToolResultCallback = { data ->
                 console.log("🔧 Tool result: ${data.tool_name}")
-                // Tool results can be shown in a special UI element if needed
+                // Добавляем tool result в список для отображения
+                toolResults = toolResults + data
+                console.log("🔧 Tool results count: ${toolResults.size}")
             },
             onNewMessageCallback = { message ->
                 console.log("📨 New message from WebSocket: ${message.content.take(100)}")
                 // Clear streaming state when final message arrives
                 streamingText = null
                 streamingIteration = 0
+                toolResults = emptyList()  // Очищаем tool results
                 // Add message to chat
                 messages = messages + message
                 scope.launch {
@@ -457,24 +461,17 @@ fun ClaudeChatApp() {
                                     expandedDirs + dirPath
                                 }
                             },
-                            onProjectPathChange = { relativePath ->
-                                console.log("📁 Double-clicked on folder: $relativePath")
+                            onProjectPathChange = { absolutePath ->
+                                console.log("📁 Double-clicked on folder: $absolutePath")
                                 scope.launch {
                                     try {
-                                        // Формируем полный абсолютный путь
-                                        val currentPath = projectPath ?: ""
-                                        val fullPath = if (currentPath.isEmpty()) {
-                                            relativePath
-                                        } else {
-                                            "$currentPath/$relativePath"
-                                        }
+                                        // Путь уже абсолютный, используем его напрямую
+                                        console.log("📁 Setting project path to: $absolutePath")
 
-                                        console.log("📁 Setting project path to: $fullPath")
-
-                                        val response = ApiClient.setProjectPath(fullPath, currentSessionId)
+                                        val response = ApiClient.setProjectPath(absolutePath, currentSessionId)
                                         if (response.success) {
                                             console.log("✅ Project path set to: ${response.projectPath}")
-                                            projectPath = response.projectPath ?: fullPath
+                                            projectPath = response.projectPath ?: absolutePath
 
                                             // Перезагружаем дерево файлов с новым путем
                                             console.log("🔄 Reloading file tree for new path...")
@@ -628,7 +625,8 @@ fun ClaudeChatApp() {
                 messages = messages,
                 isLoading = isLoading,
                 showTokenCount = settings.showTokenCount,
-                streamingText = streamingText
+                streamingText = streamingText,
+                toolResults = toolResults
             )
 
             InputPanel(
@@ -651,6 +649,7 @@ fun ClaudeChatApp() {
                             onStreamingTextClear = {  // 🆕 Очистка промежуточных сообщений
                                 streamingText = null
                                 streamingIteration = 0
+                                toolResults = emptyList()  // Очищаем tool results
                             }
                         )
                     }

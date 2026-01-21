@@ -48,6 +48,22 @@ class LocalAndroidStudioAgent(
     @Volatile
     private var androidProjectPath: String? = initialAndroidProjectPath
 
+    /**
+     * Resolves a file path to an absolute path.
+     * If the path is already absolute, returns it as-is.
+     * If the path is relative, resolves it against the project path.
+     * Also handles the case where an absolute path is passed but should be used directly.
+     */
+    private fun resolveFilePath(filePath: String, projectPath: String): File {
+        return if (filePath.startsWith("/") || filePath.matches(Regex("^[A-Za-z]:\\\\.+"))) {
+            // Already an absolute path - use it directly
+            File(filePath)
+        } else {
+            // Relative path - resolve against project path
+            File(projectPath, filePath)
+        }
+    }
+
     @Volatile
     private var screenshotsDir: File? = null
     @Volatile
@@ -277,6 +293,11 @@ class LocalAndroidStudioAgent(
             description = """
                 Control Android Studio emulator, build projects, and execute ADB commands.
                 Project path: ${androidProjectPath ?: "Not configured"}
+
+                FILE READING PRIORITY:
+                - read_file: DEFAULT for viewing files. Returns COMPLETE content. Use for "show file", "read file", "display contents".
+                - read_file_lines: ONLY for searching patterns or reading specific line ranges. Use when user asks to "find", "search", or specifies line numbers.
+                - find_files: Search for files by name pattern.
             """.trimIndent(),
             enabled = true,
             input_schema = buildJsonObject {
@@ -302,8 +323,19 @@ class LocalAndroidStudioAgent(
                             add("logcat_clear")
                             add("browse_files")
                             add("read_file")
+                            add("read_file_lines")
+                            add("find_files")
                             add("save_log")
                         }
+                    }
+                    putJsonObject("action_description") {
+                        put("type", "string")
+                        put("description", """
+                            Action descriptions:
+                            - read_file: DEFAULT method for reading files. Returns COMPLETE file content. Use for: "show file", "read file", "display file contents", viewing any file.
+                            - read_file_lines: ONLY for specific line ranges or pattern search. Use ONLY when: searching for specific text, reading specific line numbers, or file is very large (>100KB).
+                            - find_files: Search for files by name pattern (e.g., *.kt, *.xml).
+                        """.trimIndent())
                     }
                     putJsonObject("project_path") {
                         put("type", "string")
@@ -347,11 +379,33 @@ class LocalAndroidStudioAgent(
                     }
                     putJsonObject("file_path") {
                         put("type", "string")
-                        put("description", "Relative path to file in Android project")
+                        put("description", "Path to file. Can be relative to project or absolute. Used by read_file (full content) and read_file_lines (partial/search).")
                     }
                     putJsonObject("directory_path") {
                         put("type", "string")
-                        put("description", "Relative path to directory in Android project")
+                        put("description", "Path to directory. Can be relative to project or absolute.")
+                    }
+                    // Parameters for read_file_lines action
+                    putJsonObject("start_line") {
+                        put("type", "integer")
+                        put("description", "For read_file_lines: starting line number (1-based)")
+                    }
+                    putJsonObject("end_line") {
+                        put("type", "integer")
+                        put("description", "For read_file_lines: ending line number (inclusive)")
+                    }
+                    putJsonObject("search_pattern") {
+                        put("type", "string")
+                        put("description", "For read_file_lines: regex pattern to search for in file")
+                    }
+                    // Parameters for find_files action
+                    putJsonObject("pattern") {
+                        put("type", "string")
+                        put("description", "For find_files: file name pattern with wildcards (e.g., *.kt, build.gradle*)")
+                    }
+                    putJsonObject("max_depth") {
+                        put("type", "integer")
+                        put("description", "For find_files: maximum directory depth to search")
                     }
                     putJsonObject("log_content") {
                         put("type", "string")
@@ -451,6 +505,14 @@ class LocalAndroidStudioAgent(
             "read_file" -> {
                 logger.info("→ [EXEC_CMD] Calling readFile")
                 readFile(arguments)
+            }
+            "read_file_lines" -> {
+                logger.info("→ [EXEC_CMD] Calling readFileLines")
+                readFileLines(arguments)
+            }
+            "find_files" -> {
+                logger.info("→ [EXEC_CMD] Calling findFiles")
+                findFiles(arguments)
             }
             "save_log" -> {
                 logger.info("→ [EXEC_CMD] Calling saveLog")
@@ -1163,33 +1225,38 @@ class LocalAndroidStudioAgent(
     }
 
     private suspend fun browseFiles(arguments: JsonObject): String = withContext(Dispatchers.IO) {
-        logger.info(" browseFiles called with arguments: $arguments")
+        logger.info("📂 [BROWSE_FILES] browseFiles called with arguments: $arguments")
         if (androidProjectPath == null) {
-            logger.error(" Android project path is not configured")
+            logger.error("❌ [BROWSE_FILES] Android project path is not configured")
             return@withContext errorJson("Android project path not configured")
         }
 
         try {
-            val relativePath = arguments["directory_path"]?.jsonPrimitive?.content ?: ""
-            val targetDir = if (relativePath.isEmpty()) File(androidProjectPath) else File(androidProjectPath, relativePath)
-            logger.debug(" Target directory: ${targetDir.absolutePath}")
+            val directoryPath = arguments["directory_path"]?.jsonPrimitive?.content ?: ""
+            // Use resolveFilePath to handle both absolute and relative paths
+            val targetDir = if (directoryPath.isEmpty()) {
+                File(androidProjectPath!!)
+            } else {
+                resolveFilePath(directoryPath, androidProjectPath!!)
+            }
+            logger.debug("📂 [BROWSE_FILES] Target directory: ${targetDir.absolutePath} (original path: $directoryPath)")
 
             if (!targetDir.exists()) {
-                logger.error(" Directory not found")
+                logger.error("❌ [BROWSE_FILES] Directory not found")
                 return@withContext errorJson("Directory not found: ${targetDir.absolutePath}")
             }
             if (!targetDir.isDirectory) {
-                logger.error(" Path is not a directory")
+                logger.error("❌ [BROWSE_FILES] Path is not a directory")
                 return@withContext errorJson("Path is not a directory: ${targetDir.absolutePath}")
             }
 
             val files = targetDir.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
-            logger.debug(" Found ${files?.size ?: 0} items in directory")
+            logger.debug("📂 [BROWSE_FILES] Found ${files?.size ?: 0} items in directory")
 
             buildJsonObject {
                 put("status", "success")
                 put("path", targetDir.absolutePath)
-                put("relative_path", relativePath)
+                put("original_path", directoryPath)
                 putJsonArray("files") {
                     files?.forEach { file ->
                         addJsonObject {
@@ -1225,7 +1292,7 @@ class LocalAndroidStudioAgent(
 
             logger.info("📂 Building file tree for: ${rootDir.absolutePath} (max depth: $maxDepth)")
 
-            fun buildTree(dir: File, currentDepth: Int, relativePath: String = ""): JsonObject? {
+            fun buildTree(dir: File, currentDepth: Int): JsonObject? {
                 if (currentDepth > maxDepth) return null
 
                 // Skip common directories that should be ignored
@@ -1236,24 +1303,22 @@ class LocalAndroidStudioAgent(
 
                 return buildJsonObject {
                     put("name", dir.name)
-                    put("path", if (relativePath.isEmpty()) dir.name else "$relativePath/${dir.name}")
+                    // Используем абсолютный путь вместо относительного
+                    put("path", dir.absolutePath)
                     put("type", "directory")
 
                     putJsonArray("children") {
                         files.forEach { file ->
                             if (file.isDirectory) {
-                                val childTree = buildTree(
-                                    file,
-                                    currentDepth + 1,
-                                    if (relativePath.isEmpty()) dir.name else "$relativePath/${dir.name}"
-                                )
+                                val childTree = buildTree(file, currentDepth + 1)
                                 if (childTree != null) {
                                     add(childTree)
                                 }
                             } else {
                                 addJsonObject {
                                     put("name", file.name)
-                                    put("path", if (relativePath.isEmpty()) "${dir.name}/${file.name}" else "$relativePath/${dir.name}/${file.name}")
+                                    // Используем абсолютный путь для файлов
+                                    put("path", file.absolutePath)
                                     put("type", "file")
                                 }
                             }
@@ -1280,17 +1345,19 @@ class LocalAndroidStudioAgent(
     }
 
     private suspend fun readFile(arguments: JsonObject): String = withContext(Dispatchers.IO) {
-        logger.info(" readFile called with arguments: $arguments")
+        logger.info("📄 [READ_FILE] readFile called with arguments: $arguments")
         if (androidProjectPath == null) {
-            logger.error(" Android project path is not configured")
+            logger.error("❌ [READ_FILE] Android project path is not configured")
             return@withContext errorJson("Android project path not configured")
         }
 
         try {
             val filePath = arguments["file_path"]?.jsonPrimitive?.content
                 ?: return@withContext errorJson("Missing file_path parameter")
-            val targetFile = File(androidProjectPath, filePath)
-            logger.debug(" Reading file: ${targetFile.absolutePath}")
+
+            // Use resolveFilePath to handle both absolute and relative paths
+            val targetFile = resolveFilePath(filePath, androidProjectPath!!)
+            logger.debug("📄 [READ_FILE] Reading file: ${targetFile.absolutePath} (original path: $filePath)")
 
             if (!targetFile.exists()) {
                 logger.error(" File not found")
@@ -1319,6 +1386,150 @@ class LocalAndroidStudioAgent(
             logger.error(" Exception during readFile")
             e.printStackTrace()
             errorJson("Read file failed: ${e.message}")
+        }
+    }
+
+    private suspend fun readFileLines(arguments: JsonObject): String = withContext(Dispatchers.IO) {
+        logger.info("📄 [READ_LINES] Reading file lines with arguments: $arguments")
+        if (androidProjectPath == null) {
+            logger.error("❌ [READ_LINES] Android project path is not configured")
+            return@withContext errorJson("Android project path not configured")
+        }
+
+        try {
+            val filePath = arguments["file_path"]?.jsonPrimitive?.content
+                ?: return@withContext errorJson("Missing file_path parameter")
+            val startLine = arguments["start_line"]?.jsonPrimitive?.intOrNull
+            val endLine = arguments["end_line"]?.jsonPrimitive?.intOrNull
+            val searchPattern = arguments["search_pattern"]?.jsonPrimitive?.content
+
+            // Use resolveFilePath to handle both absolute and relative paths
+            val targetFile = resolveFilePath(filePath, androidProjectPath!!)
+            logger.debug("📄 [READ_LINES] Reading file: ${targetFile.absolutePath} (original path: $filePath)")
+
+            if (!targetFile.exists()) {
+                logger.error("❌ [READ_LINES] File not found")
+                return@withContext errorJson("File not found: ${targetFile.absolutePath}")
+            }
+            if (!targetFile.isFile) {
+                logger.error("❌ [READ_LINES] Path is not a file")
+                return@withContext errorJson("Path is not a file: ${targetFile.absolutePath}")
+            }
+
+            val allLines = targetFile.readLines()
+            logger.debug("   Total lines in file: ${allLines.size}")
+
+            val resultLines = when {
+                searchPattern != null -> {
+                    logger.debug("   Searching for pattern: $searchPattern")
+                    val regex = Regex(searchPattern)
+                    allLines.withIndex()
+                        .filter { (_, line) -> regex.containsMatchIn(line) }
+                        .map { (index, line) -> "${index + 1}: $line" }
+                }
+                startLine != null && endLine != null -> {
+                    logger.debug("   Reading lines $startLine to $endLine")
+                    val start = (startLine - 1).coerceAtLeast(0)
+                    val end = endLine.coerceAtMost(allLines.size)
+                    allLines.subList(start, end)
+                        .withIndex()
+                        .map { (index, line) -> "${start + index + 1}: $line" }
+                }
+                startLine != null -> {
+                    logger.debug("   Reading from line $startLine to end")
+                    val start = (startLine - 1).coerceAtLeast(0)
+                    allLines.drop(start)
+                        .withIndex()
+                        .map { (index, line) -> "${start + index + 1}: $line" }
+                }
+                else -> {
+                    logger.debug("   Reading all lines")
+                    allLines.withIndex()
+                        .map { (index, line) -> "${index + 1}: $line" }
+                }
+            }
+
+            logger.info("✅ [READ_LINES] Read ${resultLines.size} lines")
+
+            buildJsonObject {
+                put("status", "success")
+                put("file_path", filePath)
+                put("absolute_path", targetFile.absolutePath)
+                put("total_lines", allLines.size)
+                put("returned_lines", resultLines.size)
+                put("content", resultLines.joinToString("\n"))
+                if (searchPattern != null) put("search_pattern", searchPattern)
+                if (startLine != null) put("start_line", startLine)
+                if (endLine != null) put("end_line", endLine)
+            }.toString()
+        } catch (e: Exception) {
+            logger.error("❌ [READ_LINES] Exception during readFileLines")
+            e.printStackTrace()
+            errorJson("Read file lines failed: ${e.message}")
+        }
+    }
+
+    private suspend fun findFiles(arguments: JsonObject): String = withContext(Dispatchers.IO) {
+        logger.info("🔍 [FIND_FILES] Finding files with arguments: $arguments")
+        if (androidProjectPath == null) {
+            logger.error("❌ [FIND_FILES] Android project path is not configured")
+            return@withContext errorJson("Android project path not configured")
+        }
+
+        try {
+            val pattern = arguments["pattern"]?.jsonPrimitive?.content
+                ?: return@withContext errorJson("Missing pattern parameter")
+            val maxDepth = arguments["max_depth"]?.jsonPrimitive?.intOrNull ?: Int.MAX_VALUE
+
+            val rootDir = File(androidProjectPath)
+            logger.debug("   Searching in: ${rootDir.absolutePath}")
+            logger.debug("   Pattern: $pattern")
+            logger.debug("   Max depth: $maxDepth")
+
+            val ignoredDirs = setOf(".git", ".gradle", "build", ".idea", "node_modules", ".kotlin")
+            val foundFiles = mutableListOf<JsonObject>()
+
+            fun searchFiles(dir: File, currentDepth: Int, relativePath: String = "") {
+                if (currentDepth > maxDepth) return
+                if (dir.name in ignoredDirs) return
+
+                dir.listFiles()?.forEach { file ->
+                    val fileRelativePath = if (relativePath.isEmpty()) file.name else "$relativePath/${file.name}"
+
+                    if (file.isDirectory) {
+                        searchFiles(file, currentDepth + 1, fileRelativePath)
+                    } else if (file.isFile) {
+                        // Check if file matches pattern
+                        val regex = pattern.replace("*", ".*").replace("?", ".").toRegex()
+                        if (regex.matches(file.name)) {
+                            foundFiles.add(buildJsonObject {
+                                put("name", file.name)
+                                put("path", fileRelativePath)
+                                put("absolute_path", file.absolutePath)
+                                put("size", file.length())
+                                put("last_modified", file.lastModified())
+                            })
+                        }
+                    }
+                }
+            }
+
+            searchFiles(rootDir, 0)
+            logger.info("✅ [FIND_FILES] Found ${foundFiles.size} files matching pattern")
+
+            buildJsonObject {
+                put("status", "success")
+                put("pattern", pattern)
+                put("max_depth", maxDepth)
+                put("found_count", foundFiles.size)
+                putJsonArray("files") {
+                    foundFiles.forEach { add(it) }
+                }
+            }.toString()
+        } catch (e: Exception) {
+            logger.error("❌ [FIND_FILES] Exception during findFiles")
+            e.printStackTrace()
+            errorJson("Find files failed: ${e.message}")
         }
     }
 

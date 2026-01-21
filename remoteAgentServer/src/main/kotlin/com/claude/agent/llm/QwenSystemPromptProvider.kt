@@ -72,15 +72,23 @@ class QwenSystemPromptProvider : SystemPromptProvider {
 2. Если инструмент подходит для задачи — ОБЯЗАТЕЛЬНО используй его
 3. НЕ отвечай текстом вместо вызова инструмента
 
-Формат вызова:
-{"name": "get_weather_forecast", "arguments": {...}}
-{"name": "android_studio_mcp", "arguments": {"action": "list_emulators"}}
+ФОРМАТ ВЫЗОВА ИНСТРУМЕНТОВ:
 
-НЕ используй:
+Правильно:
+{"name": "get_weather_forecast", "arguments": {"latitude": 55.75, "longitude": 37.61}}
+{"name": "android_studio_mcp", "arguments": {"action": "list_emulators"}}
+{"name": "android_studio_mcp", "arguments": {"action": "start_emulator", "avd_name": "Pixel_5"}}
+
+НЕПРАВИЛЬНО (НЕ ДЕЛАЙ ТАК):
+{"name": "list_emulators"}  ❌ (это действие, а не инструмент!)
+{"name": "start_emulator", "arguments": {"avd_name": "..."}}  ❌ (это действие!)
 {"name": "mcp", "arguments": {"action": "..."}}  ❌
 {"name": "tool", "arguments": {"name": "..."}}  ❌
 
-Вызывай инструменты НАПРЯМУЮ по имени!
+ВАЖНО ДЛЯ android_studio_mcp:
+- list_emulators, start_emulator, stop_emulator - это ДЕЙСТВИЯ (action), а НЕ инструменты!
+- Вызывай их через android_studio_mcp с параметром action
+- Пример: {"name": "android_studio_mcp", "arguments": {"action": "list_emulators"}}
 
 ВАЖНО: Если пользователь просит что-то, для чего есть инструмент — вызови его, а не говори "я не могу"!
 """

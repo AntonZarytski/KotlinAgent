@@ -50,7 +50,7 @@ data class Settings(
     val sendHistory: Boolean = true,
     val showTokenCount: Boolean = true,
     val showAllIntermediateMessages: Boolean = true,
-    val enabledTools: Set<String> = setOf("plan_actions", "android_studio_mcp", "support_ticket_mcp", "project_help"),  // По умолчанию включены (исправлено: plan_tool_chain -> plan_actions)
+    val enabledTools: Set<String> = setOf("plan_actions", "android_studio_mcp", "support_ticket_mcp"),  // По умолчанию включены (project_help отключен)
     val useRag: Boolean = false,                // Использовать RAG для контекста
     val ragTopK: Int = 3,                       // Количество релевантных чанков
     val ragMinSimilarity: Float = 0.3f,         // Минимальный порог схожести (0.0-1.0)

@@ -35,11 +35,11 @@ fun FileTreeItem(
         }
         if (isDirectory) {
             onClick { onDirToggle(node.path) }
-            // Double-click on ANY folder to set project path
+            // Double-click on ANY folder to set project path (node.path contains absolute path)
             if (onProjectPathChange != null) {
                 onDoubleClick {
                     console.log("📁 Double-clicked on folder: ${node.path}")
-                    onProjectPathChange(node.path)
+                    onProjectPathChange(node.path)  // Pass absolute path directly
                 }
             }
         }
