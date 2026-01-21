@@ -133,7 +133,7 @@ object AppConfig {
     }
 
     val ollamaModel: String by lazy {
-        getEnv("OLLAMA_MODEL") ?: "qwen2.5-coder:7b-instruct"
+        getEnv("OLLAMA_MODEL") ?: "qwen2.5:1.5b"
     }
 
     init {

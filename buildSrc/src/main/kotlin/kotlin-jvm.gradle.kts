@@ -10,8 +10,8 @@ plugins {
 }
 
 kotlin {
-    // Use Java 24 as specified in CLAUDE.md
-    jvmToolchain(24)
+    // Use Java 21 for compatibility with VPS servers
+    jvmToolchain(21)
 }
 
 tasks.withType<Test>().configureEach {

@@ -429,14 +429,23 @@ fun Application.module() {
         claudeLlmProvider = null
     }
 
-    // Qwen провайдер - всегда доступен
-    logger.info("✅ Initializing Qwen (local) provider...")
-    val qwenLlmProvider = com.claude.agent.llm.QwenLlmProvider(
+    // Qwen провайдеры - всегда доступны
+    logger.info("✅ Initializing Qwen 1.5B provider...")
+    val qwen15bProvider = com.claude.agent.llm.QwenLlmProvider(
         httpClient = httpClient,
         mcpTools = mcpTools,
         webSocketService = webSocketService,
         baseUrl = AppConfig.ollamaUrl,
-        modelName = AppConfig.ollamaModel
+        modelName = "qwen2.5:1.5b"
+    )
+
+    logger.info("✅ Initializing Qwen 7B provider...")
+    val qwen7bProvider = com.claude.agent.llm.QwenLlmProvider(
+        httpClient = httpClient,
+        mcpTools = mcpTools,
+        webSocketService = webSocketService,
+        baseUrl = AppConfig.ollamaUrl,
+        modelName = "qwen2.5:7b"
     )
 
     // Выбираем провайдер по умолчанию из конфигурации
@@ -446,24 +455,29 @@ fun Application.module() {
                 logger.info("✅ Default LLM Provider: Claude (Anthropic)")
                 claudeLlmProvider
             } else {
-                logger.warn("⚠️ Claude provider requested but not available, falling back to Qwen")
-                qwenLlmProvider
+                logger.warn("⚠️ Claude provider requested but not available, falling back to Qwen 1.5B")
+                qwen15bProvider
             }
         }
-        "local" -> {
-            logger.info("✅ Default LLM Provider: Qwen (Ollama)")
-            qwenLlmProvider
+        "qwen-7b", "qwen7b" -> {
+            logger.info("✅ Default LLM Provider: Qwen 7B (Ollama)")
+            qwen7bProvider
+        }
+        "local", "qwen-1.5b", "qwen1.5b" -> {
+            logger.info("✅ Default LLM Provider: Qwen 1.5B (Ollama)")
+            qwen15bProvider
         }
         else -> {
-            logger.warn("⚠️ Unknown LLM provider '${AppConfig.llmProvider}', using Local (Qwen)")
-            qwenLlmProvider
+            logger.warn("⚠️ Unknown LLM provider '${AppConfig.llmProvider}', using Qwen 1.5B")
+            qwen15bProvider
         }
     }
 
     // Создаем фабрику провайдеров
     val llmProviderFactory = com.claude.agent.llm.LlmProviderFactory(
         claudeLlmProvider = claudeLlmProvider,
-        qwenLlmProvider = qwenLlmProvider,
+        qwen15bProvider = qwen15bProvider,
+        qwen7bProvider = qwen7bProvider,
         defaultProvider = defaultLlmProvider
     )
 

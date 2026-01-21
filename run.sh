@@ -2,7 +2,7 @@
 
 # Скрипт для запуска приложения с правильной версией Java
 
-export JAVA_HOME=$(/usr/libexec/java_home -v 24)
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 echo "Using Java: $JAVA_HOME"
 
 ./gradlew :app:run

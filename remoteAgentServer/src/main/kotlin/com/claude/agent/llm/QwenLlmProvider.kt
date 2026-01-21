@@ -11,6 +11,7 @@ import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
@@ -29,7 +30,7 @@ class QwenLlmProvider(
     private val mcpTools: MCPTools,
     private val webSocketService: WebSocketService,
     private val baseUrl: String = "http://localhost:11434",
-    private val modelName: String = "qwen2.5-coder:7b-instruct"
+    private val modelName: String = "qwen2.5:1.5b"
 ) : LlmProvider {
     
     private val logger = LoggerFactory.getLogger(QwenLlmProvider::class.java)
@@ -165,8 +166,20 @@ class QwenLlmProvider(
     }
     
     override fun isConfigured(): Boolean {
-        // Проверяем доступность Ollama сервера
-        return true // TODO: добавить проверку доступности
+        return try {
+            // Проверяем доступность Ollama сервера
+            runBlocking {
+                val response = httpClient.get("$baseUrl/api/tags")
+                val isAvailable = response.status.isSuccess()
+                if (!isAvailable) {
+                    logger.warn("Ollama server not available at $baseUrl: ${response.status}")
+                }
+                isAvailable
+            }
+        } catch (e: Exception) {
+            logger.error("Failed to check Ollama availability: ${e.message}")
+            false
+        }
     }
 
     override fun getProviderName(): String = "Qwen (Ollama)"
@@ -435,6 +448,12 @@ class QwenLlmProvider(
                 )
             )
 
+            // Логируем полный запрос для отладки
+            logger.info("=== OLLAMA REQUEST ===")
+            logger.info("URL: $baseUrl/api/chat")
+            logger.info("Request body: ${Json.encodeToString(OllamaChatRequest.serializer(), request)}")
+            logger.info("=== END REQUEST ===")
+
             val response = httpClient.post("$baseUrl/api/chat") {
                 contentType(ContentType.Application.Json)
                 setBody(request)
@@ -443,7 +462,8 @@ class QwenLlmProvider(
             if (!response.status.isSuccess()) {
                 val errorBody = response.bodyAsText()
                 logger.error("Ollama API error: ${response.status}, body: $errorBody")
-                throw RuntimeException("Ollama API error: ${response.status}")
+                logger.error("Request was: ${Json.encodeToString(OllamaChatRequest.serializer(), request)}")
+                throw RuntimeException("Ollama API error: ${response.status} - $errorBody")
             }
 
             val chatResponse = response.body<OllamaChatResponse>()
