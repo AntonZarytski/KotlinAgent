@@ -86,3 +86,5 @@ object ToolIterationConfig {
 
 // === Маркер конца результата для spec mode ===
 const val SPEC_END_MARKER = "---END_RESULT---"
+
+const val localModel = "llama3.2"

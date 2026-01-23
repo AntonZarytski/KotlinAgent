@@ -258,7 +258,7 @@ elif [ "$TOTAL_RAM" -lt 4096 ]; then
     LLM_MODEL="qwen2:0.5b"
 else
     echo "✅ Достаточно RAM для больших моделей"
-    LLM_MODEL="qwen2.5-coder:7b-instruct"
+    LLM_MODEL="llama3.2"
 fi
 
 echo "🤖 Выбранная LLM модель: $LLM_MODEL"

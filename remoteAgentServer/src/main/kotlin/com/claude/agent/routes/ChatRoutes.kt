@@ -46,8 +46,11 @@ fun Route.chatRoutes(
             }
 
             // Валидация параметров
-            val maxTokens = request.max_tokens.coerceIn(128, 4096)
-            val temperature = request.temperature.coerceIn(0.0, 1.0)
+            val maxTokens = request.max_tokens.coerceIn(128, 8192)
+            val temperature = request.temperature.coerceIn(0.0, 2.0)
+            val topP = request.top_p.coerceIn(0.0, 1.0)
+            val topK = request.top_k.coerceIn(1, 100)
+            val contextWindow = request.context_window.coerceIn(512, 32768)
 
             logger.info("Параметры: format=${request.output_format}, max_tokens=$maxTokens, " +
                     "spec_mode=${request.spec_mode}, history_len=${request.conversation_history.size}, " +
@@ -165,11 +168,19 @@ $context
                 model = null, // Используем модель по умолчанию для провайдера
                 maxTokens = maxTokens,
                 temperature = temperature,
+                topP = topP,
+                topK = topK,
+                contextWindow = contextWindow,
                 enabledTools = if (isHelpCommand) emptyList() else request.enabled_tools,
                 clientIp = clientIp,
                 userLocation = request.user_location,
                 sessionId = request.session_id,
-                showIntermediateMessages = request.show_intermediate_messages
+                showIntermediateMessages = request.show_intermediate_messages,
+                useRag = request.use_rag,
+                ragTopK = request.rag_top_k,
+                ragMinSimilarity = request.rag_min_similarity,
+                ragFilterEnabled = request.rag_filter_enabled,
+                selectedFiles = request.selected_files
             )
 
             // Обработка ошибок

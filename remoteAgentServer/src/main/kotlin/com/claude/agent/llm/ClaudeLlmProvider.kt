@@ -22,11 +22,19 @@ class ClaudeLlmProvider(
         model: String?,
         maxTokens: Int,
         temperature: Double,
+        topP: Double,
+        topK: Int,
+        contextWindow: Int,
         enabledTools: List<String>,
         clientIp: String?,
         userLocation: com.claude.agent.models.UserLocation?,
         sessionId: String?,
-        showIntermediateMessages: Boolean
+        showIntermediateMessages: Boolean,
+        useRag: Boolean,
+        ragTopK: Int,
+        ragMinSimilarity: Double,
+        ragFilterEnabled: Boolean,
+        selectedFiles: List<String>
     ): LlmResponse {
         // Извлекаем последнее пользовательское сообщение
         val userMessage = messages.lastOrNull { it.role == "user" }?.content ?: ""
@@ -59,11 +67,11 @@ class ClaudeLlmProvider(
             userLocation = userLocation,
             sessionId = sessionId,
             showIntermediateMessages = showIntermediateMessages,
-            useRag = false, // RAG будет обрабатываться на уровне ClaudeClient
-            ragTopK = 3,
-            ragMinSimilarity = 0.3,
-            ragFilterEnabled = true,
-            selectedFiles = emptyList()
+            useRag = useRag,
+            ragTopK = ragTopK,
+            ragMinSimilarity = ragMinSimilarity,
+            ragFilterEnabled = ragFilterEnabled,
+            selectedFiles = selectedFiles
         )
         
         // Конвертируем ClaudeResponse в LlmResponse

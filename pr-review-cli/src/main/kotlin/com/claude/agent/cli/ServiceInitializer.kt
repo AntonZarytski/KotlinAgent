@@ -1,5 +1,6 @@
 package com.claude.agent.cli
 
+import com.claude.agent.config.localModel
 import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.llm.ClaudeLlmProvider
 import com.claude.agent.llm.QwenLlmProvider
@@ -179,7 +180,7 @@ class ServiceInitializer {
             mcpTools = mcpTools,
             webSocketService = webSocketService,
             baseUrl = "http://localhost:11434",
-            modelName = "qwen2.5-coder:7b-instruct"
+            modelName = localModel
         )
 
         // Выбираем провайдер (по умолчанию Claude для CLI)

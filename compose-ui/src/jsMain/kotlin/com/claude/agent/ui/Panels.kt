@@ -210,7 +210,7 @@ fun SettingsPanel(
                 }
                 Input(InputType.Range) {
                     attr("min", "0")
-                    attr("max", "1")
+                    attr("max", "2")
                     attr("step", "0.1")
                     value("${settings.temperature}")
                     style {
@@ -220,6 +220,117 @@ fun SettingsPanel(
                         val value = (event.target as HTMLInputElement).value.toFloatOrNull() ?: 1.0f
                         onSettingsChange(settings.copy(temperature = value))
                     }
+                }
+            }
+
+            // Top-P (Nucleus Sampling)
+            Div({ style { property("margin-bottom", "24px") } }) {
+                Label(null, {
+                    style {
+                        property("display", "block")
+                        property("font-size", "14px")
+                        property("font-weight", "600")
+                        property("color", "#374151")
+                        property("margin-bottom", "8px")
+                    }
+                }) {
+                    Text("🎯 Top-P (Nucleus): ${settings.topP}")
+                }
+                Input(InputType.Range) {
+                    attr("min", "0")
+                    attr("max", "1")
+                    attr("step", "0.05")
+                    value("${settings.topP}")
+                    style {
+                        property("width", "100%")
+                    }
+                    onInput { event ->
+                        val value = (event.target as HTMLInputElement).value.toFloatOrNull() ?: 0.9f
+                        onSettingsChange(settings.copy(topP = value))
+                    }
+                }
+                Div({
+                    style {
+                        property("font-size", "12px")
+                        property("color", "#6b7280")
+                        property("margin-top", "4px")
+                    }
+                }) {
+                    Text("Суммарная вероятность токенов (выше = более разнообразный текст)")
+                }
+            }
+
+            // Top-K
+            Div({ style { property("margin-bottom", "24px") } }) {
+                Label(null, {
+                    style {
+                        property("display", "block")
+                        property("font-size", "14px")
+                        property("font-weight", "600")
+                        property("color", "#374151")
+                        property("margin-bottom", "8px")
+                    }
+                }) {
+                    Text("🔢 Top-K: ${settings.topK}")
+                }
+                Input(InputType.Range) {
+                    attr("min", "1")
+                    attr("max", "100")
+                    attr("step", "1")
+                    value("${settings.topK}")
+                    style {
+                        property("width", "100%")
+                    }
+                    onInput { event ->
+                        val value = (event.target as HTMLInputElement).value.toIntOrNull() ?: 40
+                        onSettingsChange(settings.copy(topK = value))
+                    }
+                }
+                Div({
+                    style {
+                        property("font-size", "12px")
+                        property("color", "#6b7280")
+                        property("margin-top", "4px")
+                    }
+                }) {
+                    Text("Количество кандидатов для выбора (выше = больше вариантов)")
+                }
+            }
+
+            // Context Window
+            Div({ style { property("margin-bottom", "24px") } }) {
+                Label(null, {
+                    style {
+                        property("display", "block")
+                        property("font-size", "14px")
+                        property("font-weight", "600")
+                        property("color", "#374151")
+                        property("margin-bottom", "8px")
+                    }
+                }) {
+                    Text("📚 Контекстное окно: ${settings.contextWindow}")
+                }
+                Input(InputType.Range) {
+                    attr("min", "512")
+                    attr("max", "32768")
+                    attr("step", "512")
+                    value("${settings.contextWindow}")
+                    style {
+                        property("width", "100%")
+                    }
+                    onInput { event ->
+                        val value = (event.target as HTMLInputElement).value.toIntOrNull() ?: 4096
+                        onSettingsChange(settings.copy(contextWindow = value))
+                    }
+                }
+                Div({
+                    style {
+                        property("font-size", "12px")
+                        property("color", "#6b7280")
+                        property("margin-top", "4px")
+                    }
+                }) {
+                    Text("Размер контекста модели в токенах")
                 }
             }
 

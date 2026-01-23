@@ -1,9 +1,13 @@
 package com.claude.agent.llm
 
+import com.claude.agent.common.database.normalizeToRange
+import com.claude.agent.config.localModel
 import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.models.Message
 import com.claude.agent.models.TokenUsage
 import com.claude.agent.models.UserLocation
+import com.claude.agent.service.OllamaEmbeddingClient
+import com.claude.agent.service.RagService
 import com.claude.agent.service.WebSocketMessage
 import com.claude.agent.service.WebSocketService
 import io.ktor.client.*
@@ -19,26 +23,30 @@ import org.slf4j.LoggerFactory
 
 /**
  * Провайдер для локальной Qwen модели через Ollama API
- * 
+ *
  * Поддерживает:
  * - Tool calling через Ollama API
  * - Итеративное выполнение инструментов
  * - WebSocket уведомления
+ * - RAG интеграцию
+ * - Чтение выбранных файлов
  */
 class QwenLlmProvider(
     private val httpClient: HttpClient,
     private val mcpTools: MCPTools,
     private val webSocketService: WebSocketService,
     private val baseUrl: String = "http://localhost:11434",
-    private val modelName: String = "qwen2.5:1.5b"
+    private val modelName: String = localModel,
+    private val ragService: RagService? = null,
+    private val ollamaEmbeddingClient: OllamaEmbeddingClient? = null
 ) : LlmProvider {
-    
+
     private val logger = LoggerFactory.getLogger(QwenLlmProvider::class.java)
-    
+
     companion object {
         private const val MAX_TOOL_ITERATIONS = 20
     }
-    
+
     @Serializable
     data class OllamaChatRequest(
         val model: String,
@@ -47,66 +55,77 @@ class QwenLlmProvider(
         val stream: Boolean = false,
         val options: OllamaOptions? = null
     )
-    
+
     @Serializable
     data class OllamaMessage(
         val role: String,
         val content: String,
         val tool_calls: List<OllamaToolCall>? = null
     )
-    
+
     @Serializable
     data class OllamaToolCall(
         val function: OllamaFunction
     )
-    
+
     @Serializable
     data class OllamaFunction(
         val name: String,
         val arguments: JsonObject
     )
-    
+
     @Serializable
     data class OllamaTool(
         val type: String = "function",
         val function: OllamaToolFunction
     )
-    
+
     @Serializable
     data class OllamaToolFunction(
         val name: String,
         val description: String,
         val parameters: JsonObject
     )
-    
+
     @Serializable
     data class OllamaOptions(
         val temperature: Double? = null,
-        val num_predict: Int? = null
+        val num_predict: Int? = null,
+        val top_p: Double? = null,
+        val top_k: Int? = null,
+        val num_ctx: Int? = null  // Контекстное окно
     )
-    
+
     @Serializable
     data class OllamaChatResponse(
         val model: String,
         val message: OllamaMessage,
         val done: Boolean
     )
-    
+
     override suspend fun generate(
         systemPrompt: String,
         messages: List<Message>,
         model: String?,
         maxTokens: Int,
         temperature: Double,
+        topP: Double,
+        topK: Int,
+        contextWindow: Int,
         enabledTools: List<String>,
         clientIp: String?,
         userLocation: UserLocation?,
         sessionId: String?,
-        showIntermediateMessages: Boolean
+        showIntermediateMessages: Boolean,
+        useRag: Boolean,
+        ragTopK: Int,
+        ragMinSimilarity: Double,
+        ragFilterEnabled: Boolean,
+        selectedFiles: List<String>
     ): LlmResponse {
         return try {
             val actualModel = model ?: modelName
-            
+
             logger.info("=== Qwen LLM Request ===")
             logger.info("Model: $actualModel")
             logger.info("Max tokens: $maxTokens")
@@ -114,12 +133,49 @@ class QwenLlmProvider(
             logger.info("Enabled tools: ${enabledTools.size}")
             logger.info("System prompt: $systemPrompt")
             logger.info("Messages count: ${messages.size}")
-            
+
             // Включаем MCP серверы
             mcpTools.enableServers(enabledTools)
 
-            // Формируем сообщения для Ollama
-            val ollamaMessages = buildOllamaMessages(systemPrompt, messages)
+            // Получаем контекст выбранных файлов
+            val fileContext = if (selectedFiles.isNotEmpty()) {
+                retrieveFileContext(selectedFiles, sessionId)
+            } else null
+
+            // Получаем RAG контекст
+            val ragContext = if (useRag) {
+                val query = messages.lastOrNull()?.content ?: ""
+                retrieveRagContext(query, ragTopK, ragMinSimilarity, ragFilterEnabled)
+            } else null
+
+            // Логируем полученные контексты
+            if (fileContext != null) {
+                logger.info("📂 File context retrieved: ${fileContext.length} chars")
+            }
+            if (ragContext != null) {
+                logger.info("🔍 RAG context retrieved: ${ragContext.length} chars")
+            }
+
+            // Дополняем последнее сообщение пользователя контекстом
+            val augmentedMessages = if (fileContext != null || ragContext != null) {
+                val lastMessage = messages.lastOrNull()
+                if (lastMessage != null) {
+                    val contextParts = mutableListOf<String>()
+                    if (fileContext != null) contextParts.add(fileContext)
+                    if (ragContext != null) contextParts.add(ragContext)
+
+                    val augmentedContent = contextParts.joinToString("\n\n") + "\n\n" + lastMessage.content
+
+                    messages.dropLast(1) + lastMessage.copy(content = augmentedContent)
+                } else {
+                    messages
+                }
+            } else {
+                messages
+            }
+
+            // Формируем сообщения для Ollama с дополненным контекстом
+            val ollamaMessages = buildOllamaMessages(systemPrompt, augmentedMessages)
             logger.info("OllamaMessages: $ollamaMessages")
 
             // Получаем инструменты
@@ -138,22 +194,25 @@ class QwenLlmProvider(
                 tools = tools,
                 maxTokens = maxTokens,
                 temperature = temperature,
+                topP = topP,
+                topK = topK,
+                contextWindow = contextWindow,
                 enabledTools = enabledTools,
                 clientIp = clientIp,
                 userLocation = userLocation,
                 sessionId = sessionId,
                 showIntermediateMessages = showIntermediateMessages
             )
-            
+
             logger.info("Qwen response completed. Tokens: $totalTokens, finalReply: \n$finalReply \nintermediateMessages: $intermediateMessages")
-            
+
             LlmResponse(
                 reply = finalReply,
                 usage = TokenUsage(input_tokens = totalTokens, output_tokens = totalTokens),
                 error = null,
                 intermediateMessages = intermediateMessages
             )
-            
+
         } catch (e: Exception) {
             logger.error("Qwen LLM error: ${e.message}", e)
             LlmResponse(
@@ -164,7 +223,160 @@ class QwenLlmProvider(
             )
         }
     }
-    
+
+    /**
+     * Получает контекст выбранных файлов
+     */
+    private suspend fun retrieveFileContext(
+        selectedFiles: List<String>,
+        sessionId: String?
+    ): String? {
+        if (selectedFiles.isEmpty()) {
+            return null
+        }
+
+        return try {
+            logger.info("📂 Processing ${selectedFiles.size} selected files...")
+
+            val fileContents = mutableListOf<String>()
+
+            // Расширения бинарных файлов, для которых не нужно читать содержимое
+            val binaryExtensions = setOf(
+                "aab", "apk", "jar", "aar", "so", "a", "o",
+                "zip", "tar", "gz", "7z", "rar",
+                "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico",
+                "mp3", "mp4", "avi", "mov", "wav", "flac",
+                "pdf", "doc", "docx", "xls", "xlsx",
+                "class", "dex", "bin", "exe", "dll"
+            )
+
+            for (filePath in selectedFiles) {
+                try {
+                    val fileName = filePath.substringAfterLast('/')
+                    val extension = fileName.substringAfterLast('.', "").lowercase()
+                    val hasExtension = fileName.contains('.')
+                    val isBinary = extension in binaryExtensions
+
+                    // Если нет расширения - скорее всего это папка
+                    if (!hasExtension) {
+                        fileContents.add("""
+                            |Directory: $filePath
+                            |Type: Directory
+                            |Note: This is a directory path. The full path is available for use with tools.
+                        """.trimMargin())
+                        logger.info("📁 Directory: $filePath")
+                    } else if (isBinary) {
+                        // Для бинарных файлов просто указываем путь
+                        fileContents.add("""
+                            |File: $filePath
+                            |Type: Binary file (.$extension)
+                            |Note: This is a binary file. The full path is available for use with tools.
+                        """.trimMargin())
+                        logger.info("📦 Binary file: $filePath (.$extension)")
+                    } else {
+                        // Для текстовых файлов читаем содержимое
+                        val result = mcpTools.callLocalTool(
+                            toolName = "android_studio",
+                            arguments = buildJsonObject {
+                                put("action", "read_file")
+                                put("file_path", filePath)
+                            },
+                            clientIp = null,
+                            userLocation = null,
+                            sessionId = sessionId
+                        )
+
+                        val resultJson = Json.parseToJsonElement(result).jsonObject
+                        val content = resultJson["content"]?.jsonPrimitive?.content
+
+                        if (content != null) {
+                            fileContents.add("""
+                                |File: $filePath
+                                |```
+                                |$content
+                                |```
+                            """.trimMargin())
+                            logger.info("✅ Read text file: $filePath (${content.length} chars)")
+                        } else {
+                            logger.warn("⚠️ Failed to read file: $filePath")
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.error("❌ Error processing file $filePath: ${e.message}")
+                }
+            }
+
+            if (fileContents.isEmpty()) {
+                return null
+            }
+
+            """
+            |<selected_files>
+            |The user has selected the following files for context:
+            |
+            |${fileContents.joinToString("\n\n")}
+            |</selected_files>
+            """.trimMargin()
+
+        } catch (e: Exception) {
+            logger.error("Failed to retrieve file context: ${e.message}", e)
+            null
+        }
+    }
+
+    /**
+     * Получает RAG контекст для запроса
+     */
+    private suspend fun retrieveRagContext(
+        query: String,
+        topK: Int,
+        minSimilarity: Double = 0.3,
+        filterEnabled: Boolean = true
+    ): String? {
+        return try {
+            if (ragService == null || ollamaEmbeddingClient == null) {
+                logger.warn("RAG services not configured")
+                return null
+            }
+
+            logger.info("🔍 Retrieving RAG context for query: ${query.take(100)}...")
+
+            // Генерируем embedding для запроса
+            val queryEmbedding = ollamaEmbeddingClient.embed(query)
+            logger.debug("Generated query embedding: ${queryEmbedding.size} dimensions")
+
+            // ВАЖНО: Нормализуем вектор запроса так же, как при индексации
+            val normalizedQueryEmbedding = normalizeToRange(queryEmbedding)
+            logger.debug("Normalized query embedding to [0,1] range")
+
+            // Ищем релевантные чанки
+            // Если фильтрация отключена, устанавливаем порог в 0.0 для получения всех результатов
+            val effectiveMinSimilarity = if (filterEnabled) minSimilarity else 0.0
+            logger.info("RAG filtering: enabled=$filterEnabled, threshold=$effectiveMinSimilarity, topK=$topK")
+
+            val results = ragService.search(
+                queryEmbedding = normalizedQueryEmbedding,
+                topK = topK,
+                minSimilarity = effectiveMinSimilarity
+            )
+
+            if (results.isEmpty()) {
+                logger.info("No relevant RAG context found")
+                return null
+            }
+
+            logger.info("Found ${results.size} relevant chunks (similarities: ${results.map { "%.3f".format(it.similarity) }})")
+
+            // Форматируем контекст
+            ragService.formatContext(results)
+
+        } catch (e: Exception) {
+            logger.error("Failed to retrieve RAG context: ${e.message}", e)
+            null
+        }
+    }
+
+
     override fun isConfigured(): Boolean {
         return try {
             // Проверяем доступность Ollama сервера
@@ -418,6 +630,9 @@ class QwenLlmProvider(
         tools: List<OllamaTool>?,
         maxTokens: Int,
         temperature: Double,
+        topP: Double,
+        topK: Int,
+        contextWindow: Int,
         enabledTools: List<String>,
         clientIp: String?,
         userLocation: UserLocation?,
@@ -444,7 +659,10 @@ class QwenLlmProvider(
                 stream = false,
                 options = OllamaOptions(
                     temperature = temperature,
-                    num_predict = maxTokens
+                    num_predict = maxTokens,
+                    top_p = topP,
+                    top_k = topK,
+                    num_ctx = contextWindow
                 )
             )
 
@@ -682,6 +900,7 @@ class QwenLlmProvider(
     /**
      * Автоматически исправляет неправильные вызовы инструментов
      * Возвращает пару (исправленное имя, исправленные аргументы) или null если исправление невозможно
+     * Также исправляет неправильные имена параметров (например, directory_path -> project_path)
      */
     private fun fixToolCall(toolName: String, arguments: JsonObject): Pair<String, JsonObject>? {
         // Карта действий android_studio_mcp, которые модель может вызывать напрямую
@@ -697,12 +916,24 @@ class QwenLlmProvider(
         if (toolName in androidStudioActions) {
             logger.info("🔧 Auto-fixing tool call: $toolName -> android_studio_mcp with action=$toolName")
 
-            // Создаем новые аргументы с action
+            // Создаем новые аргументы с action и исправленными именами параметров
             val fixedArguments = buildJsonObject {
                 put("action", toolName)
-                // Копируем все остальные аргументы
+
+                // Копируем аргументы с маппингом неправильных имен параметров
                 arguments.forEach { (key, value) ->
-                    put(key, value)
+                    // Исправляем неправильные имена параметров в зависимости от действия
+                    val fixedKey = when {
+                        // set_project_path требует project_path, а не directory_path
+                        toolName == "set_project_path" && key == "directory_path" -> {
+                            logger.info("🔧 Auto-fixing parameter name: directory_path -> project_path")
+                            "project_path"
+                        }
+                        // browse_files требует directory_path (это правильно)
+                        // read_file требует file_path (это правильно)
+                        else -> key
+                    }
+                    put(fixedKey, value)
                 }
             }
 

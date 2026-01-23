@@ -133,7 +133,12 @@ object AppConfig {
     }
 
     val ollamaModel: String by lazy {
-        getEnv("OLLAMA_MODEL") ?: "qwen2.5:1.5b"
+        getEnv("OLLAMA_MODEL") ?: "llama3.2"
+    }
+
+    // === Logging Configuration ===
+    val enableFileLogging: Boolean by lazy {
+        getEnv("ENABLE_FILE_LOGGING")?.toBoolean() ?: true
     }
 
     init {

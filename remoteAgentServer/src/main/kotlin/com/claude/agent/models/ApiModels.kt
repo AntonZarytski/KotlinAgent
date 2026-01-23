@@ -41,6 +41,9 @@ data class ChatRequest(
     val output_format: String = "default",
     val max_tokens: Int = 1024,
     val temperature: Double = 1.0,
+    val top_p: Double = 0.9,                // Nucleus sampling (0.0-1.0)
+    val top_k: Int = 40,                    // Top-K sampling
+    val context_window: Int = 4096,         // Размер контекстного окна (num_ctx в Ollama)
     val spec_mode: Boolean = false,
     val conversation_history: List<Message> = emptyList(),
     val enabled_tools: List<String> = emptyList(),

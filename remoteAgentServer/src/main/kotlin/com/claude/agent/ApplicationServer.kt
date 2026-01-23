@@ -429,24 +429,20 @@ fun Application.module() {
         claudeLlmProvider = null
     }
 
-    // Qwen провайдеры - всегда доступны
-    logger.info("✅ Initializing Qwen 1.5B provider...")
+    // Qwen провайдер - использует модель из конфигурации
+    logger.info("✅ Initializing Qwen provider with model: ${AppConfig.ollamaModel}")
     val qwen15bProvider = com.claude.agent.llm.QwenLlmProvider(
         httpClient = httpClient,
         mcpTools = mcpTools,
         webSocketService = webSocketService,
         baseUrl = AppConfig.ollamaUrl,
-        modelName = "qwen2.5:1.5b"
+        modelName = AppConfig.ollamaModel,
+        ragService = ragService,
+        ollamaEmbeddingClient = ollamaEmbeddingClient
     )
 
-    logger.info("✅ Initializing Qwen 7B provider...")
-    val qwen7bProvider = com.claude.agent.llm.QwenLlmProvider(
-        httpClient = httpClient,
-        mcpTools = mcpTools,
-        webSocketService = webSocketService,
-        baseUrl = AppConfig.ollamaUrl,
-        modelName = "qwen2.5:7b"
-    )
+    // Для обратной совместимости - qwen7bProvider указывает на тот же провайдер
+    val qwen7bProvider = qwen15bProvider
 
     // Выбираем провайдер по умолчанию из конфигурации
     val defaultLlmProvider = when (AppConfig.llmProvider.lowercase()) {

@@ -46,6 +46,9 @@ data class Settings(
     val outputFormat: String = "default",
     val maxTokens: Int = 1024,
     val temperature: Float = 1.0f,
+    val topP: Float = 0.9f,                     // Nucleus sampling (0.0-1.0)
+    val topK: Int = 40,                         // Top-K sampling
+    val contextWindow: Int = 4096,              // Размер контекстного окна
     val specMode: Boolean = false,
     val sendHistory: Boolean = true,
     val showTokenCount: Boolean = true,
@@ -66,6 +69,9 @@ data class ChatRequest(
     val max_tokens: Int = 1024,
     val spec_mode: Boolean = false,
     val temperature: Float = 1.0f,
+    val top_p: Double = 0.9,                    // Nucleus sampling (0.0-1.0)
+    val top_k: Int = 40,                        // Top-K sampling
+    val context_window: Int = 4096,             // Размер контекстного окна
     val conversation_history: List<Message> = emptyList(),
     val enabled_tools: List<String> = emptyList(),
     val user_location: UserLocation? = null,

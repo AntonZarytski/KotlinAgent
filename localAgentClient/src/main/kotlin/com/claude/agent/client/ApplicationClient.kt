@@ -18,7 +18,7 @@ fun main() = runBlocking {
     // Or ws://95.217.187.167:8001 for non-secure WebSocket connection(when server deployed on VPS)
     // Or ws://127.0.0.1:8001 for debug(when server run locally)
     // Or wss://127.0.0.1:8443 for debug with https(when server run locally)
-    val vpsUrl = "ws://95.217.187.167:8001"
+    val vpsUrl = "ws://127.0.0.1:8001"
 
     val agent = LocalAndroidStudioAgent(
         vpsUrl = vpsUrl,
