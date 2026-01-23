@@ -223,6 +223,34 @@ fun SettingsPanel(
                 }
             }
 
+            // Context Window
+            Div({ style { property("margin-bottom", "24px") } }) {
+                Label(null, {
+                    style {
+                        property("display", "block")
+                        property("font-size", "14px")
+                        property("font-weight", "600")
+                        property("color", "#374151")
+                        property("margin-bottom", "8px")
+                    }
+                }) {
+                    Text("🪟 Контекстное окно: ${settings.contextWindow}")
+                }
+                Input(InputType.Range) {
+                    attr("min", "1024")
+                    attr("max", "32768")
+                    attr("step", "512")
+                    value("${settings.contextWindow}")
+                    style {
+                        property("width", "100%")
+                    }
+                    onInput { event ->
+                        val value = (event.target as HTMLInputElement).value.toIntOrNull() ?: 4096
+                        onSettingsChange(settings.copy(contextWindow = value))
+                    }
+                }
+            }
+
             // Top-P (Nucleus Sampling)
             Div({ style { property("margin-bottom", "24px") } }) {
                 Label(null, {

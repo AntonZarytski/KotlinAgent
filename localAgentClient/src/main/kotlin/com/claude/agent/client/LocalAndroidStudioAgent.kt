@@ -640,31 +640,33 @@ class LocalAndroidStudioAgent(
 
             logger.info("   Process started with PID: ${process.pid()}")
 
-            logger.info("   Waiting for emulator to boot (max 60 seconds)...")
-            repeat(60) { attempt ->
-                delay(1000)
-
-                if (attempt % 10 == 0) {
-                    logger.info("   Waiting... ${attempt}s")
-                }
+            logger.info("   Waiting for emulator to boot (max 30 seconds)...")
+            repeat(6) { attempt ->
+                delay(5000)
+                val secondsWaited = (attempt + 1) * 5
+                logger.info("   Waiting... ${secondsWaited}s")
 
                 val check = ProcessBuilder(adbPath, "devices").start()
                 val output = check.inputStream.bufferedReader().readText()
                 check.waitFor()
 
                 if (output.contains("emulator-") && output.contains("device")) {
-                    logger.info("✅ [START_EMU] Emulator started successfully after ${attempt + 1}s")
+                    logger.info("✅ [START_EMU] Emulator started successfully after ${secondsWaited}s")
                     return@withContext buildJsonObject {
                         put("status", "success")
                         put("message", "Emulator $avdName started successfully")
                         put("pid", process.pid())
-                        put("boot_time_seconds", attempt + 1)
+                        put("boot_time_seconds", secondsWaited)
                     }.toString()
                 }
             }
 
-            logger.error("❌ [START_EMU] Emulator not responding after 60 seconds")
-            errorJson("Emulator started but not responding")
+            logger.warn("⚠️ [START_EMU] Emulator still starting after 30 seconds")
+            return@withContext buildJsonObject {
+                put("status", "warning")
+                put("message", "Emulator $avdName is starting (may take 1-2 minutes)")
+                put("pid", process.pid())
+            }.toString()
         } catch (e: Exception) {
             logger.error("❌ [START_EMU] Exception occurred", e)
             logger.error("   Error: ${e.message}")
