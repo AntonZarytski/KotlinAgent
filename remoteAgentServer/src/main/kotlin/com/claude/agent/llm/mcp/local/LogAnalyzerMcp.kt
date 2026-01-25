@@ -52,7 +52,7 @@ class LogAnalyzerMcp(
                    log_analyzer {"action": "analyze_logs", "query": "топ ошибок"}
                    (raw_logs опционален - если не указан, читается app.log с сервера)
 
-                Инструмент автоматически использует RAG для поиска релевантной документации по найденным ошибкам.
+                Инструмент автоматически использует RAG для поиска релевантной документации по найденным логам.
             """.trimIndent(),
             enabled = true,
             input_schema = buildJsonObject {
@@ -153,27 +153,41 @@ class LogAnalyzerMcp(
 
     /**
      * Извлекает текст логов из JSON-ответа android_studio_mcp или возвращает как есть
+     *
+     * Поддерживаемые форматы:
+     * 1. {"content": "..."} - ответ от read_file
+     * 2. {"logs": ["...", "..."]} - массив логов
+     * 3. Обычный текст - возвращается как есть
      */
     private fun extractLogsFromJson(rawLogs: String): String {
         return try {
             // Пытаемся распарсить как JSON
             val json = kotlinx.serialization.json.Json.parseToJsonElement(rawLogs).jsonObject
 
-            // Если есть поле "logs" (массив) - это ответ от android_studio_mcp
+            // Проверяем статус ответа
+            val status = json["status"]?.jsonPrimitive?.content
+            if (status == "error") {
+                val errorMsg = json["error"]?.jsonPrimitive?.content ?: "Unknown error"
+                logger.error("Error from android_studio_mcp: $errorMsg")
+                return ""
+            }
+
+            // Если есть поле "content" - это ответ от read_file
+            val content = json["content"]?.jsonPrimitive?.content
+            if (content != null) {
+                logger.info("Detected JSON format with 'content' field (read_file response)")
+                return content
+            }
+
+            // Если есть поле "logs" (массив) - это массив логов
             val logsArray = json["logs"]?.jsonArray
             if (logsArray != null) {
                 logger.info("Detected JSON format from android_studio_mcp, extracting logs array")
                 return logsArray.joinToString("\n") { it.jsonPrimitive.content }
             }
 
-            // Если есть поле "content" - это тоже может быть ответ
-            val content = json["content"]?.jsonPrimitive?.content
-            if (content != null) {
-                logger.info("Detected JSON format with 'content' field")
-                return content
-            }
-
             // Иначе возвращаем как есть
+            logger.debug("JSON format not recognized, using raw content")
             rawLogs
         } catch (e: Exception) {
             // Не JSON - возвращаем как есть
@@ -193,7 +207,10 @@ class LogAnalyzerMcp(
                         put("total_logs", 0)
                         put("error_count", 0)
                         put("warn_count", 0)
+                        put("info_count", 0)
+                        put("debug_count", 0)
                         putJsonArray("top_errors") {}
+                        putJsonArray("top_patterns") {}
                         putJsonObject("context") {}
                     }
                 }.toString()
@@ -208,12 +225,26 @@ class LogAnalyzerMcp(
             // Classify by severity
             val errors = filteredEntries.filter { isError(it.message) }
             val warnings = filteredEntries.filter { isWarning(it.message) }
+            val infos = filteredEntries.filter { isInfo(it.message) }
+            val debugs = filteredEntries.filter { isDebug(it.message) }
 
             // Group errors by type
             val errorTypes = errors.groupBy { extractErrorType(it.message) }
                 .mapValues { (_, entries) -> entries.size }
                 .toList()
                 .sortedByDescending { it.second }
+
+            // Group ALL log patterns (not just errors)
+            val allPatterns = filteredEntries.groupBy { extractLogPattern(it.message) }
+                .mapValues { (_, entries) ->
+                    PatternInfo(
+                        count = entries.size,
+                        firstOccurrence = entries.first(),
+                        level = detectLogLevel(entries.first().message)
+                    )
+                }
+                .toList()
+                .sortedByDescending { it.second.count }
 
             // Group by logger (context)
             val loggerStats = filteredEntries.groupBy { it.logger }
@@ -230,8 +261,24 @@ class LogAnalyzerMcp(
                 }
             }
 
-            // Получаем RAG контекст для найденных ошибок
-            val ragContext = retrieveRagContext(errorTypes.take(5), loggerStats)
+            // Build top patterns (all levels)
+            val topPatterns = allPatterns.take(10).map { (pattern, info) ->
+                buildJsonObject {
+                    put("pattern", pattern)
+                    put("count", info.count)
+                    put("level", info.level)
+                    put("first_seen", info.firstOccurrence.time)
+                    put("logger", info.firstOccurrence.logger)
+                }
+            }
+
+            // Получаем RAG контекст для ВСЕХ типов логов (не только ошибок)
+            val ragContext = retrieveRagContext(
+                topErrors = errorTypes.take(3),
+                topPatterns = allPatterns.take(10),
+                loggerStats = loggerStats,
+                allEntries = filteredEntries
+            )
 
             // Generate analysis text based on query
             val analysisText = generateAnalysis(
@@ -239,7 +286,10 @@ class LogAnalyzerMcp(
                 totalLogs = filteredEntries.size,
                 errorCount = errors.size,
                 warnCount = warnings.size,
+                infoCount = infos.size,
+                debugCount = debugs.size,
                 topErrors = errorTypes.take(5),
+                topPatterns = allPatterns.take(10),
                 loggerStats = loggerStats,
                 allEntries = filteredEntries,
                 ragContext = ragContext
@@ -251,8 +301,13 @@ class LogAnalyzerMcp(
                     put("total_logs", filteredEntries.size)
                     put("error_count", errors.size)
                     put("warn_count", warnings.size)
+                    put("info_count", infos.size)
+                    put("debug_count", debugs.size)
                     putJsonArray("top_errors") {
                         topErrors.forEach { add(it) }
+                    }
+                    putJsonArray("top_patterns") {
+                        topPatterns.forEach { add(it) }
                     }
                     putJsonObject("context") {
                         loggerStats.entries.sortedByDescending { it.value }.take(10).forEach {
@@ -287,6 +342,52 @@ class LogAnalyzerMcp(
         return lowerMessage.contains("warn") ||
                 lowerMessage.contains("warning") ||
                 lowerMessage.contains("⚠️")
+    }
+
+    private fun isInfo(message: String): Boolean {
+        val lowerMessage = message.lowercase()
+        return lowerMessage.contains("info") ||
+                lowerMessage.contains("✅") ||
+                lowerMessage.contains("📊") ||
+                lowerMessage.contains("🔍") ||
+                (!isError(message) && !isWarning(message) && !isDebug(message))
+    }
+
+    private fun isDebug(message: String): Boolean {
+        val lowerMessage = message.lowercase()
+        return lowerMessage.contains("debug") ||
+                lowerMessage.contains("🐛") ||
+                lowerMessage.contains("[debug]")
+    }
+
+    private fun detectLogLevel(message: String): String {
+        return when {
+            isError(message) -> "ERROR"
+            isWarning(message) -> "WARN"
+            isDebug(message) -> "DEBUG"
+            isInfo(message) -> "INFO"
+            else -> "UNKNOWN"
+        }
+    }
+
+    /**
+     * Извлекает паттерн лога для группировки
+     * Пытается найти ключевую фразу или действие в сообщении
+     */
+    private fun extractLogPattern(message: String): String {
+        // Убираем эмодзи и специальные символы для чистоты паттерна
+        val cleanMessage = message.replace(Regex("[🔍📊✅❌⚠️🐛📁🔌💾🚀]"), "").trim()
+
+        // Пытаемся извлечь ключевую фразу (первые 60 символов)
+        val pattern = cleanMessage.take(60)
+
+        // Если есть двоеточие, берем часть до него
+        val colonIndex = pattern.indexOf(':')
+        if (colonIndex > 0 && colonIndex < 50) {
+            return pattern.substring(0, colonIndex).trim()
+        }
+
+        return pattern
     }
 
     private fun extractErrorType(message: String): String {
@@ -337,46 +438,49 @@ class LogAnalyzerMcp(
     }
 
     /**
-     * Получает релевантный контекст из RAG базы знаний на основе найденных ошибок
+     * Получает релевантный контекст из RAG базы знаний на основе найденных паттернов
+     * Теперь работает со ВСЕМИ типами логов, не только с ошибками
      */
     private suspend fun retrieveRagContext(
         topErrors: List<Pair<String, Int>>,
-        loggerStats: Map<String, Int>
+        topPatterns: List<Pair<String, PatternInfo>>,
+        loggerStats: Map<String, Int>,
+        allEntries: List<LogEntry>
     ): String? {
         if (ragService == null || ollamaEmbeddingClient == null) {
             logger.debug("RAG services not available for log analysis")
             return null
         }
 
-        if (topErrors.isEmpty() && loggerStats.isEmpty()) {
+        if (topErrors.isEmpty() && topPatterns.isEmpty() && loggerStats.isEmpty()) {
             return null
         }
 
         return try {
-            // Формируем запрос на основе найденных ошибок и модулей
-            val query = buildRagQuery(topErrors, loggerStats)
-            logger.info("🔍 Searching RAG for log analysis context: ${query.take(100)}...")
+            // Формируем запрос на основе найденных паттернов (включая конкретные строки логов)
+            val query = buildRagQuery(topErrors, topPatterns, loggerStats, allEntries)
+            logger.info("🔍 Searching RAG for log analysis context: ${query.take(150)}...")
 
             // Генерируем embedding
             val queryEmbedding = ollamaEmbeddingClient.embed(query)
             val normalizedEmbedding = normalizeToRange(queryEmbedding)
 
-            // Ищем релевантные документы
+            // Ищем релевантные документы с более широким порогом
             val results = ragService.search(
                 queryEmbedding = normalizedEmbedding,
-                topK = 3,
+                topK = 5,  // Увеличиваем количество результатов
                 minSimilarity = 0.5  // Более низкий порог для логов
             )
 
             if (results.isEmpty()) {
-                logger.info("No relevant documentation found for log errors")
+                logger.info("No relevant documentation found for log patterns")
                 return null
             }
 
             logger.info("Found ${results.size} relevant documentation chunks for log analysis")
 
             // Форматируем контекст специально для анализа логов
-            formatRagContextForLogs(results)
+            formatRagContextForLogs(results, topPatterns)
 
         } catch (e: Exception) {
             logger.error("Failed to retrieve RAG context for logs: ${e.message}", e)
@@ -385,114 +489,427 @@ class LogAnalyzerMcp(
     }
 
     /**
-     * Формирует запрос к RAG на основе найденных ошибок
+     * Формирует запрос к RAG на основе найденных паттернов
+     * Включает конкретные строки логов для более точного поиска в logs-catalog.md
      */
     private fun buildRagQuery(
         topErrors: List<Pair<String, Int>>,
-        loggerStats: Map<String, Int>
+        topPatterns: List<Pair<String, PatternInfo>>,
+        loggerStats: Map<String, Int>,
+        allEntries: List<LogEntry>
     ): String {
         return buildString {
             appendLine("Log analysis context:")
 
             if (topErrors.isNotEmpty()) {
-                appendLine("Top errors found:")
+                appendLine("\nTop errors found:")
                 topErrors.take(3).forEach { (errorType, count) ->
                     appendLine("- $errorType (occurred $count times)")
                 }
             }
 
+            if (topPatterns.isNotEmpty()) {
+                appendLine("\nTop log patterns (all levels):")
+                topPatterns.take(5).forEach { (pattern, info) ->
+                    appendLine("- [${info.level}] $pattern (occurred ${info.count} times)")
+                    // Добавляем конкретную строку лога для точного поиска
+                    appendLine("  Example: ${info.firstOccurrence.message.take(100)}")
+                }
+            }
+
             if (loggerStats.isNotEmpty()) {
-                appendLine("Most active modules:")
+                appendLine("\nMost active modules:")
                 loggerStats.entries.sortedByDescending { it.value }.take(3).forEach { (logger, count) ->
                     appendLine("- $logger ($count log entries)")
                 }
+            }
+
+            // Добавляем примеры конкретных строк логов для поиска в logs-catalog.md
+            appendLine("\nSample log messages for context:")
+            allEntries.take(5).forEach { entry ->
+                appendLine("- ${entry.message.take(80)}")
             }
         }
     }
 
     /**
      * Форматирует RAG результаты специально для анализа логов
+     * Показывает детальное объяснение каждого паттерна из logs-catalog.md
      */
-    private fun formatRagContextForLogs(results: List<RagService.SearchResult>): String {
+    private fun formatRagContextForLogs(
+        results: List<RagService.SearchResult>,
+        topPatterns: List<Pair<String, PatternInfo>>
+    ): String {
         return buildString {
-            appendLine("\n📚 Релевантная документация:\n")
+            appendLine("\n📚 Контекст из документации (logs-catalog.md):\n")
 
             results.forEachIndexed { index, result ->
                 val fileName = result.docId.substringAfterLast('/')
                 val similarityPercent = (result.similarity * 100).toInt()
 
                 appendLine("${index + 1}. $fileName (релевантность: $similarityPercent%)")
+                appendLine("   Схожесть: ${String.format("%.3f", result.similarity)}")
+                appendLine()
 
-                // Показываем краткую выдержку (первые 200 символов)
-                val excerpt = result.text.trim().take(200)
-                appendLine("   ${excerpt}...")
+                // Парсим и показываем детальную информацию из logs-catalog.md
+                val logInfo = parseLogCatalogEntry(result.text)
+                if (logInfo != null) {
+                    appendLine("   📋 Описание лога:")
+                    appendLine("   • Уровень: ${logInfo.level}")
+                    appendLine("   • Сообщение: ${logInfo.message}")
+                    if (logInfo.file.isNotEmpty()) {
+                        appendLine("   • Файл: ${logInfo.file}")
+                    }
+                    if (logInfo.whenAppears.isNotEmpty()) {
+                        appendLine("   • Когда появляется: ${logInfo.whenAppears}")
+                    }
+                    if (logInfo.meaning.isNotEmpty()) {
+                        appendLine("   • Значение: ${logInfo.meaning}")
+                    }
+                    if (logInfo.causes.isNotEmpty()) {
+                        appendLine("   • Возможные причины:")
+                        logInfo.causes.forEach { cause ->
+                            appendLine("     - $cause")
+                        }
+                    }
+                    if (logInfo.solution.isNotEmpty()) {
+                        appendLine("   • Решение: ${logInfo.solution}")
+                    }
+                } else {
+                    // Если не удалось распарсить, показываем как есть
+                    val excerpt = result.text.trim().take(300)
+                    appendLine("   $excerpt...")
+                }
+                appendLine()
+                appendLine("   " + "─".repeat(60))
                 appendLine()
             }
 
-            appendLine("💡 Рекомендации:")
-            appendLine("- Проверьте документацию выше для понимания архитектуры")
-            appendLine("- Убедитесь, что конфигурация соответствует best practices")
-            appendLine("- Рассмотрите возможность добавления обработки ошибок")
+            // Добавляем сводку по найденным паттернам
+            if (topPatterns.isNotEmpty()) {
+                appendLine("\n🔍 Анализ найденных паттернов:")
+                topPatterns.take(5).forEach { (pattern, info) ->
+                    appendLine("• [${info.level}] $pattern")
+                    appendLine("  Встречается: ${info.count} раз")
+                    appendLine("  Модуль: ${info.firstOccurrence.logger}")
+                    appendLine()
+                }
+            }
+
+            appendLine("\n💡 Рекомендации на основе анализа:")
+            appendLine("• Изучите документацию выше для понимания каждого типа лога")
+            appendLine("• Обратите внимание на частоту появления паттернов")
+            appendLine("• Проверьте модули с наибольшей активностью")
+            appendLine("• Для ошибок следуйте рекомендациям по решению из документации")
         }
     }
+
+    /**
+     * Парсит запись из logs-catalog.md для извлечения структурированной информации
+     */
+    private fun parseLogCatalogEntry(text: String): LogCatalogInfo? {
+        return try {
+            val lines = text.split("\n").map { it.trim() }
+
+            // Ищем заголовок с уровнем и сообщением
+            val headerLine = lines.firstOrNull { it.startsWith("###") } ?: return null
+            val level = when {
+                headerLine.contains("✅ INFO") -> "INFO"
+                headerLine.contains("⚠️ WARN") -> "WARN"
+                headerLine.contains("❌ ERROR") -> "ERROR"
+                headerLine.contains("🐛 DEBUG") -> "DEBUG"
+                else -> "UNKNOWN"
+            }
+
+            val message = headerLine.substringAfter(":").trim().removeSurrounding("`")
+
+            // Извлекаем остальные поля
+            var file = ""
+            var whenAppears = ""
+            var meaning = ""
+            val causes = mutableListOf<String>()
+            var solution = ""
+
+            var inCauses = false
+
+            for (line in lines) {
+                when {
+                    line.startsWith("- **Файл:**") -> file = line.substringAfter("**Файл:**").trim().removeSurrounding("`")
+                    line.startsWith("- **Когда появляется:**") -> whenAppears = line.substringAfter("**Когда появляется:**").trim()
+                    line.startsWith("- **Значение:**") -> meaning = line.substringAfter("**Значение:**").trim()
+                    line.startsWith("- **Возможные причины:**") -> inCauses = true
+                    line.startsWith("- **Решение:**") -> {
+                        inCauses = false
+                        solution = line.substringAfter("**Решение:**").trim()
+                    }
+                    inCauses && line.startsWith("  -") -> causes.add(line.substring(3).trim())
+                }
+            }
+
+            LogCatalogInfo(level, message, file, whenAppears, meaning, causes, solution)
+        } catch (e: Exception) {
+            logger.debug("Failed to parse log catalog entry: ${e.message}")
+            null
+        }
+    }
+
+    private data class LogCatalogInfo(
+        val level: String,
+        val message: String,
+        val file: String,
+        val whenAppears: String,
+        val meaning: String,
+        val causes: List<String>,
+        val solution: String
+    )
 
     private fun generateAnalysis(
         query: String,
         totalLogs: Int,
         errorCount: Int,
         warnCount: Int,
+        infoCount: Int,
+        debugCount: Int,
         topErrors: List<Pair<String, Int>>,
+        topPatterns: List<Pair<String, PatternInfo>>,
         loggerStats: Map<String, Int>,
         allEntries: List<LogEntry>,
         ragContext: String?
     ): String {
         val builder = StringBuilder()
 
-        builder.append("📊 Анализ логов:\n\n")
-        builder.append("Всего записей: $totalLogs\n")
-        builder.append("Ошибок (ERROR): $errorCount\n")
-        builder.append("Предупреждений (WARN): $warnCount\n")
-        builder.append("Информационных: ${totalLogs - errorCount - warnCount}\n\n")
+        builder.append("📊 Комплексный анализ логов:\n\n")
 
+        // 1. Статистика
+        builder.append("═══ 1. СТАТИСТИКА ═══\n")
+        builder.append("Всего записей: $totalLogs\n")
+        builder.append("• Ошибок (ERROR): $errorCount (${percentage(errorCount, totalLogs)}%)\n")
+        builder.append("• Предупреждений (WARN): $warnCount (${percentage(warnCount, totalLogs)}%)\n")
+        builder.append("• Информационных (INFO): $infoCount (${percentage(infoCount, totalLogs)}%)\n")
+        builder.append("• Отладочных (DEBUG): $debugCount (${percentage(debugCount, totalLogs)}%)\n\n")
+
+        // 2. Топ паттернов (все уровни)
+        if (topPatterns.isNotEmpty()) {
+            builder.append("═══ 2. ТОП ПАТТЕРНОВ (ВСЕ УРОВНИ) ═══\n")
+            topPatterns.take(10).forEachIndexed { index, (pattern, info) ->
+                val percentage = percentage(info.count, totalLogs)
+                builder.append("${index + 1}. [${info.level}] $pattern\n")
+                builder.append("   Частота: ${info.count} раз ($percentage%)\n")
+                builder.append("   Модуль: ${info.firstOccurrence.logger}\n")
+                builder.append("   Первое появление: ${info.firstOccurrence.time}\n")
+            }
+            builder.append("\n")
+        }
+
+        // 3. Топ ошибок (детально)
         if (topErrors.isNotEmpty()) {
-            builder.append("🔴 Топ ошибок:\n")
+            builder.append("═══ 3. ТОП ОШИБОК (ДЕТАЛЬНО) ═══\n")
             topErrors.forEachIndexed { index, (errorType, count) ->
-                val percentage = (count.toDouble() / errorCount * 100).toInt()
-                builder.append("${index + 1}. $errorType — $count раз ($percentage%)\n")
+                val percentage = if (errorCount > 0) percentage(count, errorCount) else 0
+                builder.append("${index + 1}. $errorType\n")
+                builder.append("   Встречается: $count раз ($percentage% всех ошибок)\n")
             }
             builder.append("\n")
         } else {
+            builder.append("═══ 3. ТОП ОШИБОК ═══\n")
             builder.append("✅ Ошибок не обнаружено\n\n")
         }
 
+        // 4. Временные паттерны
+        builder.append("═══ 4. ВРЕМЕННЫЕ ПАТТЕРНЫ ═══\n")
+        val timeAnalysis = analyzeTimePatterns(allEntries)
+        builder.append(timeAnalysis)
+        builder.append("\n")
+
+        // 5. Анализ модулей
         if (loggerStats.isNotEmpty()) {
-            builder.append("📦 Контекст (по модулям):\n")
-            loggerStats.entries.sortedByDescending { it.value }.take(5).forEach { (logger, count) ->
-                val percentage = (count.toDouble() / totalLogs * 100).toInt()
-                builder.append("- $logger: $count записей ($percentage%)\n")
+            builder.append("═══ 5. АНАЛИЗ МОДУЛЕЙ ═══\n")
+            loggerStats.entries.sortedByDescending { it.value }.take(10).forEach { (logger, count) ->
+                val percentage = percentage(count, totalLogs)
+                builder.append("• $logger: $count записей ($percentage%)\n")
             }
             builder.append("\n")
         }
 
-        // Add query-specific insights
-        if (query.contains("чаще", ignoreCase = true) && topErrors.isNotEmpty()) {
-            val (mostFrequent, count) = topErrors.first()
-            builder.append("🎯 Самая частая ошибка: $mostFrequent\n")
-            builder.append("   Встречается $count раз (${(count.toDouble() / errorCount * 100).toInt()}% всех ошибок)\n")
+        // 6. Связи между событиями
+        builder.append("═══ 6. СВЯЗИ МЕЖДУ СОБЫТИЯМИ ═══\n")
+        val correlations = analyzeCorrelations(allEntries)
+        builder.append(correlations)
+        builder.append("\n")
+
+        // 7. RAG контекст (если доступен)
+        if (ragContext != null) {
+            builder.append("═══ 7. КОНТЕКСТ ИЗ ДОКУМЕНТАЦИИ ═══\n")
+            builder.append(ragContext)
+            builder.append("\n")
         }
 
-        // Добавляем RAG контекст если доступен
-        if (ragContext != null) {
-            builder.append("\n")
-            builder.append(ragContext)
+        // 8. Общие выводы
+        builder.append("═══ 8. ОБЩИЕ ВЫВОДЫ ═══\n")
+        builder.append(generateConclusions(errorCount, warnCount, infoCount, topErrors, topPatterns, allEntries))
+
+        // Query-specific insights
+        if (query.contains("чаще", ignoreCase = true) && topErrors.isNotEmpty()) {
+            builder.append("\n\n🎯 Ответ на запрос:\n")
+            val (mostFrequent, count) = topErrors.first()
+            builder.append("Самая частая ошибка: $mostFrequent\n")
+            builder.append("Встречается $count раз (${if (errorCount > 0) percentage(count, errorCount) else 0}% всех ошибок)\n")
         }
 
         return builder.toString().trim()
+    }
+
+    private fun percentage(part: Int, total: Int): Int {
+        return if (total > 0) (part.toDouble() / total * 100).toInt() else 0
+    }
+
+    /**
+     * Анализирует временные паттерны в логах
+     */
+    private fun analyzeTimePatterns(entries: List<LogEntry>): String {
+        if (entries.isEmpty()) return "Нет данных для анализа\n"
+
+        val builder = StringBuilder()
+
+        // Группируем по часам
+        val byHour = entries.groupBy { entry ->
+            try {
+                val time = parseTime(entry.time)
+                time.hour
+            } catch (e: Exception) {
+                -1
+            }
+        }.filterKeys { it >= 0 }
+
+        if (byHour.isNotEmpty()) {
+            val maxHour = byHour.maxByOrNull { it.value.size }
+            if (maxHour != null) {
+                builder.append("• Пик активности: ${maxHour.key}:00 (${maxHour.value.size} записей)\n")
+            }
+
+            // Находим часы с наибольшим количеством ошибок
+            val errorsByHour = byHour.mapValues { (_, entries) ->
+                entries.count { isError(it.message) }
+            }.filterValues { it > 0 }
+
+            if (errorsByHour.isNotEmpty()) {
+                val maxErrorHour = errorsByHour.maxByOrNull { it.value }
+                if (maxErrorHour != null) {
+                    builder.append("• Больше всего ошибок: ${maxErrorHour.key}:00 (${maxErrorHour.value} ошибок)\n")
+                }
+            }
+        }
+
+        // Анализ временных промежутков
+        if (entries.size > 1) {
+            val firstTime = entries.first().time
+            val lastTime = entries.last().time
+            builder.append("• Временной диапазон: $firstTime - $lastTime\n")
+        }
+
+        return builder.toString()
+    }
+
+    /**
+     * Анализирует корреляции между событиями
+     */
+    private fun analyzeCorrelations(entries: List<LogEntry>): String {
+        if (entries.size < 2) return "Недостаточно данных для анализа корреляций\n"
+
+        val builder = StringBuilder()
+
+        // Ищем последовательности: после какого события часто идет ошибка
+        val errors = entries.filter { isError(it.message) }
+        if (errors.isNotEmpty()) {
+            val precedingPatterns = mutableMapOf<String, Int>()
+
+            errors.forEach { error ->
+                val errorIndex = entries.indexOf(error)
+                if (errorIndex > 0) {
+                    val preceding = entries[errorIndex - 1]
+                    val pattern = extractLogPattern(preceding.message)
+                    precedingPatterns[pattern] = precedingPatterns.getOrDefault(pattern, 0) + 1
+                }
+            }
+
+            if (precedingPatterns.isNotEmpty()) {
+                val topPreceding = precedingPatterns.entries.sortedByDescending { it.value }.take(3)
+                builder.append("• События, после которых часто появляются ошибки:\n")
+                topPreceding.forEach { (pattern, count) ->
+                    builder.append("  - $pattern (${count} раз)\n")
+                }
+            }
+        }
+
+        // Ищем повторяющиеся последовательности
+        if (entries.size >= 3) {
+            builder.append("• Обнаружено ${entries.size} событий в хронологическом порядке\n")
+        }
+
+        return builder.toString()
+    }
+
+    /**
+     * Генерирует общие выводы о состоянии системы
+     */
+    private fun generateConclusions(
+        errorCount: Int,
+        warnCount: Int,
+        infoCount: Int,
+        topErrors: List<Pair<String, Int>>,
+        topPatterns: List<Pair<String, PatternInfo>>,
+        allEntries: List<LogEntry>
+    ): String {
+        val builder = StringBuilder()
+
+        // Оценка состояния системы
+        val healthScore = when {
+            errorCount == 0 && warnCount == 0 -> "Отличное"
+            errorCount == 0 && warnCount < 5 -> "Хорошее"
+            errorCount < 5 && warnCount < 10 -> "Удовлетворительное"
+            errorCount < 10 -> "Требует внимания"
+            else -> "Критическое"
+        }
+
+        builder.append("• Состояние системы: $healthScore\n")
+
+        if (errorCount > 0) {
+            builder.append("• Требуется исправление ${errorCount} ошибок\n")
+            if (topErrors.isNotEmpty()) {
+                val (topError, count) = topErrors.first()
+                builder.append("• Приоритет: $topError (встречается чаще всего)\n")
+            }
+        } else {
+            builder.append("• Критических проблем не обнаружено\n")
+        }
+
+        if (warnCount > 0) {
+            builder.append("• Рекомендуется проверить ${warnCount} предупреждений\n")
+        }
+
+        // Рекомендации
+        builder.append("\n💡 Рекомендации:\n")
+        if (errorCount > 0) {
+            builder.append("  1. Начните с исправления самых частых ошибок\n")
+            builder.append("  2. Изучите контекст из документации выше\n")
+        }
+        if (warnCount > 5) {
+            builder.append("  3. Обратите внимание на предупреждения - они могут стать ошибками\n")
+        }
+        builder.append("  4. Мониторьте модули с наибольшей активностью\n")
+
+        return builder.toString()
     }
 
     private data class LogEntry(
         val time: String,
         val logger: String,
         val message: String
+    )
+
+    private data class PatternInfo(
+        val count: Int,
+        val firstOccurrence: LogEntry,
+        val level: String
     )
 }
