@@ -63,7 +63,7 @@ fun Route.fileTreeRoutes() {
             }
 
             val result = LocalAgentManager.executeOnLocalAgent(
-                toolName = "android_studio",
+                toolName = "android_studio_mcp",
                 arguments = arguments,
                 timeoutMs = 30_000L  // 30 секунд для построения дерева
             )
@@ -131,7 +131,7 @@ fun Route.fileTreeRoutes() {
             }
 
             val result = LocalAgentManager.executeOnLocalAgent(
-                toolName = "android_studio",
+                toolName = "android_studio_mcp",
                 arguments = arguments,
                 timeoutMs = 10_000L  // 10 секунд для установки пути
             )

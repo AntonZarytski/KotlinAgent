@@ -130,6 +130,9 @@ class QwenLlmProvider(
             logger.info("Model: $actualModel")
             logger.info("Max tokens: $maxTokens")
             logger.info("Temperature: $temperature")
+            logger.info("Top-P: $topP")
+            logger.info("Top-K: $topK")
+            logger.info("Context window: $contextWindow")
             logger.info("Enabled tools: ${enabledTools.size}")
             logger.info("System prompt: $systemPrompt")
             logger.info("Messages count: ${messages.size}")
@@ -667,9 +670,19 @@ class QwenLlmProvider(
             )
 
             // Логируем полный запрос для отладки
-            logger.info("=== OLLAMA REQUEST ===")
+            logger.info("=== OLLAMA REQUEST (iteration $iteration) ===")
             logger.info("URL: $baseUrl/api/chat")
-            logger.info("Request body: ${Json.encodeToString(OllamaChatRequest.serializer(), request)}")
+            logger.info("Model: ${request.model}")
+            logger.info("Messages count: ${request.messages.size}")
+            logger.info("Tools count: ${request.tools?.size ?: 0}")
+            logger.info("Stream: ${request.stream}")
+            logger.info("=== PARAMETERS ===")
+            logger.info("  temperature: ${request.options?.temperature}")
+            logger.info("  num_predict (max_tokens): ${request.options?.num_predict}")
+            logger.info("  top_p: ${request.options?.top_p}")
+            logger.info("  top_k: ${request.options?.top_k}")
+            logger.info("  num_ctx (context_window): ${request.options?.num_ctx}")
+            logger.info("Full request body: ${Json.encodeToString(OllamaChatRequest.serializer(), request)}")
             logger.info("=== END REQUEST ===")
 
             val response = httpClient.post("$baseUrl/api/chat") {
@@ -689,8 +702,16 @@ class QwenLlmProvider(
 
             // Логируем сырой ответ от Qwen
             logger.info("=== RAW QWEN RESPONSE (iteration $iteration) ===")
-            logger.info("Content: ${assistantMessage.content}")
-            logger.info("Tool calls from API: ${assistantMessage.tool_calls}")
+            logger.info("Model: ${chatResponse.model}")
+            logger.info("Done: ${chatResponse.done}")
+            logger.info("Content length: ${assistantMessage.content.length} chars")
+            logger.info("Content preview: ${assistantMessage.content.take(500)}")
+            logger.info("Tool calls from API: ${assistantMessage.tool_calls?.size ?: 0}")
+            if (assistantMessage.tool_calls != null) {
+                assistantMessage.tool_calls.forEachIndexed { idx, call ->
+                    logger.info("  Tool call #${idx + 1}: ${call.function.name}")
+                }
+            }
             logger.info("=== END RAW RESPONSE ===")
 
             // Проверяем наличие tool calls

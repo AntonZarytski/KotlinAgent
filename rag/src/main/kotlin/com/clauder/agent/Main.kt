@@ -125,7 +125,7 @@ suspend fun buildIndex(
             System.gc()
         }
 
-        println("   ✅ Document processed: ${processedChunks} chunks")
+        println("   ✅ Document processed: $processedChunks chunks")
         println()
     }
 

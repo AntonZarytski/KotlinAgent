@@ -288,7 +288,7 @@ class LocalAndroidStudioAgent(
         logger.debug("🛠️ [TOOL_DEF] Creating tool definition")
 
         val toolDef = LocalToolDefinition(
-            name = "android_studio",
+            name = "android_studio_mcp",
             ui_description = "Этот инструмент управляет Android Studio, Android Emulator, ADB, Gradle и ЛОКАЛЬНОЙ ФАЙЛОВОЙ СИСТЕМОЙ на ПОДКЛЮЧЁННОМ КОМПЬЮТЕРЕ РАЗРАБОТЧИКА.",
             description = """
                 Control Android Studio emulator, build projects, and execute ADB commands.
@@ -517,6 +517,10 @@ class LocalAndroidStudioAgent(
             "save_log" -> {
                 logger.info("→ [EXEC_CMD] Calling saveLog")
                 saveLog(arguments)
+            }
+            "read_app_log" -> {
+                logger.info("→ [EXEC_CMD] Calling readAppLog")
+                readAppLog(arguments)
             }
             else -> {
                 logger.error("❌ [EXEC_CMD] Unknown action: $action")
@@ -1563,6 +1567,88 @@ class LocalAndroidStudioAgent(
             logger.error(" Exception during saveLog")
             e.printStackTrace()
             errorJson("Save log failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Читает логи приложения (app.log) с поддержкой пагинации
+     */
+    private suspend fun readAppLog(arguments: JsonObject): String = withContext(Dispatchers.IO) {
+        logger.info("📖 [READ_APP_LOG] Reading app.log")
+        logger.debug("   Arguments: $arguments")
+
+        try {
+            val offset = arguments["offset"]?.jsonPrimitive?.intOrNull ?: 0
+            val limit = arguments["limit"]?.jsonPrimitive?.intOrNull ?: 10
+            val logFile = arguments["log_file"]?.jsonPrimitive?.content ?: "app.log"
+
+            logger.debug("   Log file: $logFile")
+            logger.debug("   Offset: $offset")
+            logger.debug("   Limit: $limit")
+
+            // Ищем файл: сначала в корне проекта, потом в текущей директории
+            val file = if (androidProjectPath != null) {
+                File(androidProjectPath, logFile).takeIf { it.exists() }
+                    ?: File(logFile).takeIf { it.exists() }
+            } else {
+                File(logFile).takeIf { it.exists() }
+            }
+
+            if (file == null || !file.exists()) {
+                logger.warn("⚠️ [READ_APP_LOG] Log file not found: $logFile")
+                return@withContext buildJsonObject {
+                    put("error", "Log file not found")
+                    putJsonArray("logs") {}
+                    put("total_lines", 0)
+                    put("offset", offset)
+                    put("limit", limit)
+                    put("has_more", false)
+                }.toString()
+            }
+
+            logger.info("✅ [READ_APP_LOG] Reading from: ${file.absolutePath}")
+            logger.info("   File size: ${file.length()} bytes")
+
+            // Читаем все строки
+            val allLines = file.readLines()
+            val totalLines = allLines.size
+
+            logger.info("   Total lines: $totalLines")
+
+            // Проверка offset
+            if (offset >= totalLines) {
+                logger.warn("⚠️ [READ_APP_LOG] Offset out of range: $offset >= $totalLines")
+                return@withContext buildJsonObject {
+                    putJsonArray("logs") {}
+                    put("total_lines", totalLines)
+                    put("offset", offset)
+                    put("limit", limit)
+                    put("has_more", false)
+                    put("message", "Offset out of range")
+                }.toString()
+            }
+
+            // Извлекаем нужный диапазон строк
+            val endIndex = minOf(offset + limit, totalLines)
+            val logLines = allLines.subList(offset, endIndex)
+
+            logger.info("   Returning lines: $offset to $endIndex")
+
+            buildJsonObject {
+                putJsonArray("logs") {
+                    logLines.forEach { add(it) }
+                }
+                put("total_lines", totalLines)
+                put("offset", offset)
+                put("limit", limit)
+                put("has_more", endIndex < totalLines)
+                put("file_path", file.absolutePath)
+            }.toString()
+
+        } catch (e: Exception) {
+            logger.error("❌ [READ_APP_LOG] Exception during readAppLog")
+            e.printStackTrace()
+            errorJson("Read app log failed: ${e.message}")
         }
     }
 

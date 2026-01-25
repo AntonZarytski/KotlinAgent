@@ -6,6 +6,7 @@ import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import org.slf4j.LoggerFactory
 import java.util.concurrent.*
 
 data class ConnectedAgent(
@@ -17,6 +18,7 @@ data class ConnectedAgent(
 )
 
 object LocalAgentManager {
+    private val logger = LoggerFactory.getLogger(LocalAgentManager::class.java)
     private val agents = ConcurrentHashMap<String, ConnectedAgent>()
     private val json = Json { ignoreUnknownKeys = true }
     
@@ -39,8 +41,9 @@ object LocalAgentManager {
                                     capabilities = message.capabilities
                                 )
                                 agents[message.agentId] = currentAgent
-                                println("✅ Agent registered: ${message.agentId}")
-                                println("   Capabilities: ${message.capabilities}")
+                                logger.info("✅ Agent registered: ${message.agentId}")
+                                logger.info("   Tool name: ${message.tool.name}")
+                                logger.info("   Capabilities: ${message.capabilities}")
                             }
                             
                             is AgentMessage.ExecuteResponse -> {
@@ -61,12 +64,12 @@ object LocalAgentManager {
                 }
             }
         } catch (e: Exception) {
-            println("❌ Agent connection error: ${e.message}")
+            logger.error("❌ Agent connection error: ${e.message}", e)
         } finally {
             currentAgent?.let {
                 agents.remove(it.agentId)
-                println("🔌 Agent disconnected: ${it.agentId}")
-                
+                logger.info("🔌 Agent disconnected: ${it.agentId}")
+
                 // Отменяем все pending requests
                 it.pendingRequests.values.forEach { deferred ->
                     deferred.completeExceptionally(Exception("Agent disconnected"))

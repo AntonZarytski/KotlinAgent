@@ -1,0 +1,383 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+KotlinAgent is a multi-module Kotlin application providing an AI chatbot platform with Claude API integration, RAG (Retrieval-Augmented Generation), MCP (Model Context Protocol) tools, and multiple interfaces (Web UI, HTTP API, WebSocket, CLI).
+
+## Requirements
+
+- **Java 24** (Kotlin 2.2.20 doesn't support Java 25)
+- **Gradle 8.14** (via wrapper)
+- **Ollama** (for RAG embeddings with mxbai-embed-large AND local LLM with qwen2.5:1.5b)
+- **Anthropic API Key** (optional, only if using Claude provider)
+
+## Core Architecture
+
+### Module Structure
+
+```
+KotlinAgent/
+├── remoteAgentServer/     # Main Ktor server with Claude integration
+├── localAgentClient/      # WebSocket client for remote MCP tools (Android Studio integration)
+├── common/                # Shared models (PRModels, RagTables)
+├── rag/                   # RAG indexing module (offline document processing)
+├── pr-review-cli/         # Standalone CLI for PR reviews
+├── compose-ui/            # Kotlin/JS web UI (builds to JavaScript)
+└── utils/                 # Shared utilities
+```
+
+### Key Architectural Patterns
+
+**1. LLM Provider Pattern** (`LlmProviderFactory`)
+- Abstraction layer for switching between Claude and local LLM (Qwen)
+- `ClaudeLlmProvider`: Wraps ClaudeClient for Claude API
+- `QwenLlmProvider`: Ollama API integration for local models
+- User selects provider in UI ("claude" or "local")
+- Common interface: `generate()`, `isConfigured()`, `getProviderName()`
+
+**2. Multi-turn Tool Calling Loop** (`QwenLlmProvider.handleToolCalling`, `ClaudeClient.handleResponse`)
+- Model requests tool execution via `tool_use` blocks (Claude) or structured JSON (Qwen)
+- Tools execute (local or via WebSocket to remote agents)
+- Results sent back to model, which can request more tools
+- Loop continues up to 20 iterations with loop detection
+- **CRITICAL**: Final answer without tool_calls is returned to user, NOT sent back to model
+
+**2. RAG Integration** (`ClaudeClient.buildMessages`)
+- Semantic search retrieves relevant docs using Ollama embeddings (768-dim vectors)
+- RAG context injected as separate content block with prompt caching
+- Normalization critical: embeddings normalized to [0,1] range during both indexing and query
+- Cache TTL: 5 minutes, reduces token costs by ~90%
+
+**3. MCP Provider Pattern**
+- `LocalMcpProvider`: Tools executed on server (Weather, Solar, Reminders, GitHub, Google Play)
+- `RemoteMcpProvider`: External MCP servers
+- `AndroidStudioLocalMcp`: Proxies commands to local agent via WebSocket
+
+**4. History Compression** (`HistoryCompressor`)
+- Sliding window keeps recent N messages
+- Older messages summarized by Claude
+- Saves context window tokens while maintaining conversation continuity
+
+**5. WebSocket Broadcasting** (`WebSocketService`)
+- Real-time updates to web clients
+- Multiple connections per session supported
+- Tool results, streaming text, and reminders broadcast live
+
+### Critical Implementation Details
+
+**RAG Normalization** (must match between indexing and query):
+```kotlin
+// Both in rag/Main.kt and ClaudeClient.kt
+fun normalizeToRange(vector: FloatArray): FloatArray {
+    val min = vector.minOrNull() ?: 0f
+    val max = vector.maxOrNull() ?: 1f
+    val range = max - min
+    return if (range > 0) {
+        vector.map { (it - min) / range }.toFloatArray()
+    } else vector
+}
+```
+
+**Prompt Caching Structure**:
+- System prompt: cached with `cache_control: ephemeral`
+- Tool definitions: cached
+- RAG context: cached in separate content block
+- User message: NOT cached (always fresh)
+
+**Tool Loop Detection**:
+- Tracks recent tool calls in `ArrayDeque`
+- Prevents infinite loops if same tool called 5+ times
+- Returns error message to break loop
+
+## Development Commands
+
+### Environment Setup
+```bash
+# Create .env file (searches current dir, parent dir, working dir)
+cat > .env << EOF
+ANTHROPIC_API_KEY=sk-ant-...
+PORT=8001
+HOST=0.0.0.0
+DATABASE_PATH=conversations.db
+STATIC_FOLDER=ui
+EOF
+```
+
+### Building and Running
+
+```bash
+# Quick run (remoteAgentServer module)
+./run.sh
+# Note: run.sh currently uses Java 21 but should use Java 24
+
+# Correct way with Java 24
+export JAVA_HOME=$(/usr/libexec/java_home -v 24)
+./gradlew :remoteAgentServer:run
+
+# Build all modules
+./gradlew build
+
+# Build specific module
+./gradlew :remoteAgentServer:build
+./gradlew :rag:build
+./gradlew :pr-review-cli:jar
+
+# Run checks and tests
+./gradlew check
+
+# Clean build
+./gradlew clean
+```
+
+### Ollama Setup (Local LLM + RAG)
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Start Ollama server
+ollama serve
+
+# Pull models
+ollama pull qwen2.5:1.5b           # Local LLM (default)
+ollama pull mxbai-embed-large      # RAG embeddings
+
+# Alternative Qwen sizes
+ollama pull qwen2.5:0.5b           # Faster, less accurate
+ollama pull qwen2.5:3b             # Balanced
+ollama pull qwen2.5:7b             # More accurate, slower
+
+# Check installed models
+ollama list
+
+# Remote server setup (for production)
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+```
+
+### RAG Operations
+
+```bash
+# Index documents (offline process)
+./gradlew :rag:run --args="./docs rag_index.db http://localhost:11434"
+
+# Test RAG integration
+./test_rag_integration.sh
+```
+
+### Local Agent (Android Studio Integration)
+
+```bash
+# Start local agent (connects to server via WebSocket)
+./localAgentClient/run-local-agent.sh
+
+# Or manual
+./gradlew :localAgentClient:run --args="wss://your-server:8443/mcp/local-agent"
+```
+
+### PR Review CLI
+
+```bash
+# Build standalone JAR
+./gradlew :pr-review-cli:jar
+
+# Run PR review
+./scripts/run-pr-review.sh --branch feature/new-api --base-branch main
+
+# Or directly
+java -jar pr-review-cli/build/libs/pr-review-cli.jar review-pr \
+  --branch feature/payment \
+  --base-branch main \
+  --enable-rag \
+  --output review.md
+```
+
+## Database Architecture
+
+**Two Separate Databases**:
+
+1. **conversations.db** (main application data)
+   - Sessions: Chat session metadata
+   - Messages: Chat history with token usage
+   - Reminders: Scheduled tasks (simple reminders, AI responses, MCP tool execution)
+
+2. **rag_index.db** (RAG vector store)
+   - DocumentChunks: Text chunks with normalized embeddings (blob storage)
+
+**Important**: Database schemas defined in:
+- `remoteAgentServer/.../database/models/Tables.kt` (Sessions, Messages, Reminders)
+- `common/.../database/RagTables.kt` (DocumentChunks)
+
+## Key Services
+
+### LlmProviderFactory (`remoteAgentServer/.../llm/LlmProviderFactory.kt`)
+- Creates appropriate LLM provider based on configuration or user selection
+- Returns `ClaudeLlmProvider` or `QwenLlmProvider`
+- Handles provider initialization with required dependencies
+
+### QwenLlmProvider (`remoteAgentServer/.../llm/QwenLlmProvider.kt`)
+- Local LLM integration via Ollama API
+- Supports tool calling with auto-fixing (converts action names to android_studio_mcp)
+- Parameters: temperature (0.0-2.0), top_p, top_k, context_window (num_ctx)
+- Parses tool calls from multiple formats: `<tool_call>`, pure JSON, markdown JSON
+- Validates required parameters before execution
+- Sends intermediate results via WebSocket
+- Methods: `generate()`, `handleToolCalling()`, `fixToolCall()`, `validateRequiredParameters()`
+
+### ClaudeClient (`remoteAgentServer/.../llm/ClaudeClient.kt`)
+- Main Claude API integration (707 lines)
+- Handles tool calling loop, RAG context injection, prompt caching
+- Methods: `sendMessage()`, `handleResponse()`, `buildMessages()`, `retrieveRagContext()`
+
+### RagService (`remoteAgentServer/.../service/RagService.kt`)
+- Semantic search using cosine similarity
+- Methods: `search()`, `formatContext()`
+- Critical: Query embeddings must be normalized before search
+
+### ReminderService (`remoteAgentServer/.../service/ReminderService.kt`)
+- Scheduler runs every second checking for due reminders
+- Three execution modes:
+  1. Simple text reminders
+  2. AI-powered responses (calls Claude)
+  3. MCP tool execution with AI formatting
+- Supports recurring reminders (minutely, hourly, daily, weekly, monthly)
+
+### HistoryCompressor (`remoteAgentServer/.../service/HistoryCompressor.kt`)
+- Compresses conversation history to save tokens
+- Keeps recent N messages, summarizes older ones
+- Records savings via `TokenMetricsService`
+
+### WebSocketService (`remoteAgentServer/.../service/WebSocketService.kt`)
+- Manages WebSocket connections per session
+- Broadcasts: tool results, streaming text, reminders
+- Thread-safe with `ConcurrentHashMap` and `Mutex`
+
+## MCP Tools
+
+**Local Tools** (executed on server):
+- `WeatherMcp`: Weather forecasts via Open-Meteo API
+- `SolarActivityMcp`: Solar activity data from NOAA
+- `ReminderMcp`: Create/manage scheduled tasks
+- `ActionPlannerMcp`: AI-powered action planning
+- `ChatSummaryMcp`: Conversation summarization
+- `GitRepositoryMcp`: GitHub operations (create issues, PRs, comments)
+- `GooglePlayPublisherMcp`: Google Play Console integration
+- `SupportTicketMcp`: Support ticket management
+- `HelpMcp`: Agent capabilities and documentation
+- `AndroidStudioLocalMcp`: Proxies to local agent via WebSocket
+
+**Remote Tools** (via local agent):
+- Android emulator control
+- ADB command execution
+- File system browsing
+
+## API Endpoints
+
+**Core Routes** (see `remoteAgentServer/.../routes/`):
+- `POST /api/chat` - Send message to Claude with RAG and tools
+- `GET /api/sessions` - List chat sessions
+- `POST /api/sessions` - Create session
+- `GET /api/sessions/{id}` - Get session history
+- `DELETE /api/sessions/{id}` - Delete session
+- `GET /api/reminders` - List reminders
+- `POST /api/reminders` - Create reminder
+- `POST /api/rag/search` - Direct RAG search
+- `GET /api/metrics` - Token usage statistics
+- `GET /health` - Service health check
+- `ws://{host}:{port}/ws/{sessionId}` - WebSocket for real-time updates
+- `ws://{host}:{port}/mcp/local-agent` - WebSocket for local agent connection
+
+## Configuration
+
+**Environment Variables** (loaded via dotenv-kotlin):
+- `ANTHROPIC_API_KEY` - Required only for Claude provider
+- `PORT` - Default: 8001
+- `HOST` - Default: 0.0.0.0
+- `DATABASE_PATH` - Default: conversations.db
+- `STATIC_FOLDER` - Default: ui
+- `OLLAMA_URL` - Ollama server URL (default: http://localhost:11434)
+- `LOCAL_MODEL` - Local model name (default: qwen2.5:1.5b)
+
+**Prompt Caching Config** (`remoteAgentServer/.../config/PromptCachingConfig.kt`):
+- `ENABLED = true` - Enables caching for system prompts, tools, RAG context
+- Requires `anthropic-beta: prompt-caching-2024-07-31` header
+
+**SSL/TLS**:
+- Auto-generates self-signed certificate (`ktor.p12`) if not present
+- HTTPS on port 8443
+- HTTP on port 8001
+
+## Important Notes
+
+### When Working with Local LLM (Qwen)
+- **Model Configuration**: Set in `AppConfig.kt` via `localModel` constant or env var
+- **Prompt Templates**: Use `QwenSystemPromptProvider` for optimized prompts (shorter, more direct)
+- **Tool Calling Format**: Supports multiple formats - automatic parsing from `<tool_call>`, JSON, markdown
+- **Auto-Fixing**: Automatically converts direct action calls (e.g., `gradle_build`) to `android_studio_mcp` with action parameter
+- **Parameter Validation**: Validates required parameters before execution, prevents incomplete tool calls
+- **UI Parameters**: All adjustable in Settings panel
+  - Temperature: 0.0-2.0 (default: 1.0)
+  - Top-P: 0.0-1.0 (default: 0.9)
+  - Top-K: 1-100 (default: 40)
+  - Context Window: 1024-32768 (default: 4096)
+- **Android Workflow**: Optimized prompts guide model through: browse_files → read_file → gradle_build → emulator → install → launch
+
+### When Working with RAG
+- **Always** normalize embeddings to [0,1] range (both indexing and query)
+- Embeddings are 768-dimensional float arrays from Ollama's mxbai-embed-large
+- RAG context separated from user message for better caching
+- Filter threshold (`rag_min_similarity`) defaults to 0.3
+- Works with both Claude and Qwen providers
+
+### When Adding MCP Tools
+1. Create tool class in `remoteAgentServer/.../llm/mcp/local/`
+2. Implement `McpTool` interface with `tool` pair and `executeTool()`
+3. Register in `LocalMcpProvider` constructor
+4. Initialize in `ApplicationServer.kt` module setup
+
+### When Modifying Tool Calling
+- Loop limit is 20 iterations (hardcoded in `ClaudeClient`)
+- Loop detection threshold is 5 (same tool called 5+ times)
+- Tool results broadcast via WebSocket in real-time
+- All tool execution is async (uses `suspend fun`)
+
+### When Working with Compose UI
+- Compose UI builds to JavaScript (Kotlin/JS)
+- Webpack output copied to `processedResources` via Gradle task
+- Build automatically triggered before server run
+- Located in `compose-ui/build/kotlin-webpack/js/productionExecutable`
+
+### Module Dependencies
+- `pr-review-cli` depends on `remoteAgentServer` (shares business logic)
+- `common` shared by all modules (data models, tables)
+- `remoteAgentServer` is the main entry point (`ApplicationServer.kt`)
+
+## Deployment
+
+**Production Scripts** (`/deploy/`):
+- `deploy.sh` - Full deployment pipeline
+- `kotlinagent.service` - Systemd service configuration
+- `setup-ollama.sh` - Install Ollama on server
+- `setup-production-ssl.sh` - Let's Encrypt SSL setup
+
+**Systemd Service**:
+```bash
+sudo systemctl start kotlinagent
+sudo systemctl stop kotlinagent
+sudo systemctl restart kotlinagent
+journalctl -u kotlinagent -f
+```
+
+## Common Pitfalls
+
+1. **Java Version**: Must use Java 24, not 25 (Kotlin 2.2.20 limitation)
+2. **RAG Normalization**: If search returns no results, check normalization is consistent
+3. **Prompt Caching**: Only works with Claude provider, requires `anthropic-beta` header
+4. **Tool Loop**: If agent gets stuck, check loop detection threshold (20 iterations max)
+5. **WebSocket**: Connections must be cleaned up on disconnect to prevent memory leaks
+6. **Module Path**: Main module is `remoteAgentServer` not `app` (old references may exist)
+7. **Ollama Not Running**: Local LLM requires Ollama server running on configured URL
+8. **Model Not Pulled**: Must run `ollama pull qwen2.5:1.5b` before using local provider
+9. **Tool Call Format**: Qwen requires exact format - use `android_studio_mcp` with `action` parameter, NOT direct action names
+10. **Final Answer Loop**: If model keeps calling tools endlessly, check that final answer (without tool_calls) is properly detected and returned

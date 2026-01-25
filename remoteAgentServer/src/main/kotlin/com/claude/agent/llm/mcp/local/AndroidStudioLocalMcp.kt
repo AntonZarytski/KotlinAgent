@@ -22,120 +22,32 @@ class AndroidStudioLocalMcp : Mcp.Local {
             name = ANDROID_STUDIO_MCP,
             ui_description = "Этот инструмент управляет Android Studio, Android Emulator, ADB, Gradle и ЛОКАЛЬНОЙ ФАЙЛОВОЙ СИСТЕМОЙ на ПОДКЛЮЧЁННОМ КОМПЬЮТЕРЕ РАЗРАБОТЧИКА.",
             description = """
-            Этот инструмент управляет Android Studio, Android Emulator, ADB, Gradle и ЛОКАЛЬНОЙ ФАЙЛОВОЙ СИСТЕМОЙ
-            на ПОДКЛЮЧЁННОМ КОМПЬЮТЕРЕ РАЗРАБОТЧИКА (не на сервере).
-        
-            ВАЖНАЯ МОДЕЛЬ ВЫПОЛНЕНИЯ:
-        
-            - Этот инструмент выполняется на ЛОКАЛЬНОМ АГЕНТЕ, запущенном на компьютере разработчика.
-            - LLM работает на СЕРВЕРЕ и НЕ имеет прямого доступа к файлам, проектам или операционной системе.
-            - ВЕСЬ доступ к файловой системе ДОЛЖЕН осуществляться через этот инструмент.
-        
-            КОРЕНЬ ПРОЕКТА И ПРАВИЛА ПУТЕЙ:
-        
-            - Корень Android-проекта может быть задан во время выполнения с помощью действия set_project_path.
-            - Используйте get_project_path, чтобы проверить текущий путь проекта.
-            - browse_files и read_file работают ТОЛЬКО внутри корня проекта.
-            - Пути, передаваемые в browse_files / read_file, ДОЛЖНЫ быть ОТНОСИТЕЛЬНЫМИ к корню проекта.
-            - Абсолютные пути из чата (например, "/Users/anton/StudioProjects/RoundTimer")
-            необходимо сначала установить через действие set_project_path,
-            а затем использовать относительные пути для операций с файлами.
-        
-            КАК РАБОТАТЬ С ФАЙЛАМИ (ОБЯЗАТЕЛЬНЫЙ АЛГОРИТМ):
-        
-            1. Если пользователь упоминает проект или папку:
-            - Начните с browse_files в корне проекта (directory_path = "")
-            - НЕ обходите все подкаталоги рекурсивно — это НЕЭФФЕКТИВНО
-            - Ограничьтесь максимум 1–2 уровнями вложенности
-            - Выведи содержимое папки, сформируй из json ответа читаемый список (не дерево фалов)
-        
-            2. Если пользователь просит:
-            - «посмотреть проект» / "show project"
-            - «найти файл» / "find file"
-            - «где реализована логика» / "where is the logic"
-            - «покажи код» / "show code"
-            - «вывести содержимое файлов» / "display file contents"
-            
-            КАК РАБОТАТЬ С Android приложениями (ОБЯЗАТЕЛЬНЫЙ АЛГОРИТМ):
-        
-            1. Если пользователь упоминает проект или проложение и просит с ним что-то сделать:
-            - Начните с browse_files в корне проекта (directory_path = "")
-            - Узнайте с каким приложением вы работаете прочитав AndroidManifest.xml
-            - Определите package_name приложения и передавай его в инструменты как package_name
-            - Выведи package_name в ответе
-        
-            2. Если пользователь просит:
-            - «собрать приложение» / "build app"
-            - «устанавить приложение» / "install app"
-            - «запустить приложение» / "run app"
-            - «удалить приложение» / "uninstall app"
-            - «вывести содержимое файлов» / "display file contents"
-        
-            ЭФФЕКТИВНЫЙ РАБОЧИЙ ПРОЦЕСС:
-            a) Один раз просмотреть корневую директорию (directory_path = "")
-            b) При необходимости углубиться на ОДИН уровень
-            c) Если пользователь попросил прочитать определенный файл - то смотри только его
-            e) Анализировать содержимое ПОСЛЕ чтения - только если пользователь попросит тебя
-        
-            ЗАПРЕЩЕНО:
-            - Просматривать все подкаталоги (com → anton → roundtimer → ...)
-            - Вызывать browse_files более 3 раз для одной задачи
-            - Исследовать структуру без цели
-        
-            3. НИКОГДА не предполагайте содержимое файлов.
-            Если нужно что-то узнать — используйте read_file.
-        
-            4. МНОГОШАГОВЫЕ ЗАДАЧИ:
-            Если пользователь просит «сделать X и Y»:
-            - Полностью выполните X
-            - Затем полностью выполните Y
-            - Сообщите о выполнении ОБОИХ шагов
-        
-            ПОДСКАЗКИ ПО СТРУКТУРЕ ANDROID-ПРОЕКТА(Только по запросу пользователя):
-        
-            - app/src/main/java или kotlin → логика приложения
-            - app/src/main/res → UI-ресурсы
-            - AndroidManifest.xml → точка входа приложения
-            - build.gradle / build.gradle.kts → конфигурация сборки
-        
-            ДОСТУПНЫЕ ДЕЙСТВИЯ:
-        
-            КОНФИГУРАЦИЯ ПРОЕКТА:
-            - set_project_path — установить путь к Android-проекту (требуется project_path)
-            - get_project_path — получить текущий путь проекта
-        
-            ЭМУЛЯТОР И ADB:
-            - start_emulator — запустить Android-эмулятор (требуется avd_name)
-            - stop_emulator — остановить запущенный эмулятор
-            - list_emulators — список доступных AVD
-            - install_apk — установить APK в эмулятор (требуется apk_path)
-            - run_app — запустить установленное приложение (требуется в начале определить package_name)
-            - adb_shell — выполнить команду adb shell (требуется command)
-            - screenshot — сделать скриншот с эмулятора
-        
-            СБОРКА И ДЕПЛОЙ:
-            - gradle_build — собрать Android-проект (требуется build_variant)
-            - gradle_install_run — собрать, установить и при необходимости запустить приложение
-        
-            ЛОГИРОВАНИЕ:
-            - logcat — получить логи Android(сформируй из json ответа от инструмента в читаемый список)
-            - logcat_clear — очистить буфер logcat
-        
-            ДЕЙСТВИЯ С ФАЙЛОВОЙ СИСТЕМОЙ (ТОЛЬКО ЛОКАЛЬНАЯ МАШИНА):
-            - browse_files — список файлов и папок относительно корня проекта
-            - read_file — чтение файла относительно корня проекта
-            - read_file_lines — чтение определенных строк файла (требуется file_path, опционально start_line, end_line, search_pattern)
-            - find_files — поиск файлов по паттерну (требуется pattern, опционально max_depth)
-            - save_log — сохранить переданное содержимое в файл на локальной машине
-        
-            КРИТИЧЕСКИЕ ПРАВИЛА:
-        
-            - НИКОГДА не обращаться к файлам напрямую.
-            - НИКОГДА не предполагать содержимое файлов.
-            - ВСЕГДА изучать структуру перед чтением, если она неизвестна.
-            - Думайте как удалённый оператор, управляющий машиной разработчика.
-        
-            Этот инструмент — ЕДИНСТВЕННЫЙ мост между LLM и локальной средой разработки Android.
+            Управление Android разработкой на ЛОКАЛЬНОЙ машине разработчика.
+
+            ПРАВИЛА:
+            - Файлы доступны ТОЛЬКО через этот инструмент
+            - Пути относительны к корню проекта
+            - Используй read_file для чтения, browse_files для просмотра
+
+            ОСНОВНЫЕ ДЕЙСТВИЯ:
+
+            Проект: set_project_path, get_project_path
+            Файлы: browse_files, read_file, find_files
+            Сборка: gradle_build, gradle_install_run
+            Эмулятор: list_emulators, start_emulator, stop_emulator
+            Запуск: install_apk, run_app
+            Логи: logcat, logcat_clear
+            ADB: adb_shell, screenshot
+
+            ТИПИЧНЫЙ WORKFLOW:
+            1. browse_files ("") → просмотр корня проекта
+            2. read_file ("AndroidManifest.xml") → узнать package_name
+            3. gradle_build → собрать APK
+            4. list_emulators → найти AVD
+            5. start_emulator (avd_name) → запустить эмулятор
+            6. gradle_install_run → установить и запустить
+
+            ВАЖНО: Всегда читай файлы перед использованием, не предполагай содержимое.
             """.trimIndent(),
             enabled = true,
             input_schema = buildJsonObject {
@@ -164,6 +76,7 @@ class AndroidStudioLocalMcp : Mcp.Local {
                             add("read_file_lines")
                             add("find_files")
                             add("save_log")
+                            add("read_app_log")
                         }
                     }
                     putJsonObject("project_path") {
@@ -245,6 +158,21 @@ class AndroidStudioLocalMcp : Mcp.Local {
                     putJsonObject("max_depth") {
                         put("type", "integer")
                         put("description", "Maximum directory depth for find_files (default: unlimited)")
+                    }
+                    putJsonObject("offset") {
+                        put("type", "integer")
+                        put("description", "Starting line number for read_app_log (0-based, default: 0)")
+                        put("default", 0)
+                    }
+                    putJsonObject("limit") {
+                        put("type", "integer")
+                        put("description", "Number of log lines to retrieve for read_app_log (default: 10)")
+                        put("default", 10)
+                    }
+                    putJsonObject("log_file") {
+                        put("type", "string")
+                        put("description", "Log file name to read (default: app.log)")
+                        put("default", "app.log")
                     }
                 }
                 putJsonArray("required") { add("action") }

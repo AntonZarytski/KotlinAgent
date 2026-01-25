@@ -35,8 +35,10 @@ import com.claude.agent.llm.mcp.local.GitRepositoryMcp
 import com.claude.agent.llm.mcp.local.HelpMcp
 import com.claude.agent.llm.mcp.local.SupportTicketMcp
 import com.claude.agent.llm.mcp.local.GooglePlayPublisherMcp
+import com.claude.agent.llm.mcp.local.LogAnalyzerMcp
 import com.claude.agent.llm.mcp.remote.AirTicketsMcp
 import com.claude.agent.routes.prReviewRoutes
+import com.claude.agent.routes.testRoutes
 import com.claude.agent.service.GitHubService
 import com.claude.agent.service.GooglePlayService
 import com.claude.agent.service.LocalAgentManager
@@ -379,6 +381,7 @@ fun Application.module() {
     val supportTicketMcp = SupportTicketMcp(ticketService)
     val googlePlayPublisherMcp = GooglePlayPublisherMcp(googlePlayService, ticketService)
     val helpMcp = HelpMcp(ragService, ollamaEmbeddingClient)
+    val logAnalyzerMcp = LogAnalyzerMcp(ragService, ollamaEmbeddingClient)
 
     val localMcpProvider = LocalMcpProvider(
         listOf(
@@ -391,7 +394,8 @@ fun Application.module() {
             googlePlayPublisherMcp,
             AndroidStudioLocalMcp(),
             GitRepositoryMcp(),
-            helpMcp
+            helpMcp,
+            logAnalyzerMcp
             )
     )
 
@@ -611,6 +615,7 @@ fun Application.module() {
             githubService = githubService
         )
         prReviewRoutes(prReviewService)
+        testRoutes()
 
         // Статические файлы (UI) - ДОЛЖНЫ БЫТЬ В КОНЦЕ!
 

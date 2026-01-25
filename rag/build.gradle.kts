@@ -34,6 +34,9 @@ dependencies {
     // SQLite database
     implementation(libs.sqliteJdbc)
 
+    // Logging
+    implementation(libs.logback)
+
     testImplementation(kotlin("test"))
 }
 
