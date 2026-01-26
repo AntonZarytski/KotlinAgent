@@ -20,15 +20,6 @@ object ClaudeConfig {
     const val MAX_TOKENS = 1024
 }
 
-// === Форматы вывода ===
-object OutputFormat {
-    const val DEFAULT = "default"
-    const val JSON = "json"
-    const val XML = "xml"
-
-    val VALID_FORMATS = listOf(DEFAULT, JSON, XML)
-}
-
 // === HTTP коды ответов ===
 object HttpStatus {
     const val OK = 200
@@ -86,5 +77,3 @@ object ToolIterationConfig {
 
 // === Маркер конца результата для spec mode ===
 const val SPEC_END_MARKER = "---END_RESULT---"
-
-const val localModel = "llama3.2"

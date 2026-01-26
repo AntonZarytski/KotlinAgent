@@ -1,7 +1,7 @@
 package com.claude.agent.llm
 
 import com.claude.agent.common.database.normalizeToRange
-import com.claude.agent.config.localModel
+import com.claude.agent.config.AppConfig.ollamaModel
 import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.models.Message
 import com.claude.agent.models.TokenUsage
@@ -36,7 +36,7 @@ class QwenLlmProvider(
     private val mcpTools: MCPTools,
     private val webSocketService: WebSocketService,
     private val baseUrl: String = "http://localhost:11434",
-    private val modelName: String = localModel,
+    private val modelName: String = ollamaModel,
     private val ragService: RagService? = null,
     private val ollamaEmbeddingClient: OllamaEmbeddingClient? = null
 ) : LlmProvider {

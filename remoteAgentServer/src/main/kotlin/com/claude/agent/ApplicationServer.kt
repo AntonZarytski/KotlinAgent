@@ -25,18 +25,13 @@ import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.llm.mcp.local.ActionPlannerMcp
 import com.claude.agent.llm.mcp.providers.RemoteMcpProvider
 import com.claude.agent.service.WebSocketService
-import com.claude.agent.llm.mcp.local.ChatSummaryMcp
 import com.claude.agent.llm.mcp.providers.LocalMcpProvider
 import com.claude.agent.llm.mcp.local.ReminderMcp
-import com.claude.agent.llm.mcp.local.SolarActivityMcp
 import com.claude.agent.llm.mcp.local.WeatherMcp
 import com.claude.agent.llm.mcp.local.AndroidStudioLocalMcp
 import com.claude.agent.llm.mcp.local.GitRepositoryMcp
-import com.claude.agent.llm.mcp.local.HelpMcp
-import com.claude.agent.llm.mcp.local.SupportTicketMcp
 import com.claude.agent.llm.mcp.local.GooglePlayPublisherMcp
 import com.claude.agent.llm.mcp.local.LogAnalyzerMcp
-import com.claude.agent.llm.mcp.remote.AirTicketsMcp
 import com.claude.agent.routes.prReviewRoutes
 import com.claude.agent.routes.testRoutes
 import com.claude.agent.service.GitHubService
@@ -375,39 +370,33 @@ fun Application.module() {
         null
     }
 
-    val remoteMcpProvider = RemoteMcpProvider(listOf(AirTicketsMcp()))
+    val remoteMcpProvider = RemoteMcpProvider(emptyList())
 
     val reminderMcp = ReminderMcp(reminderService)
-    val supportTicketMcp = SupportTicketMcp(ticketService)
     val googlePlayPublisherMcp = GooglePlayPublisherMcp(googlePlayService, ticketService)
-    val helpMcp = HelpMcp(ragService, ollamaEmbeddingClient)
     val logAnalyzerMcp = LogAnalyzerMcp(ragService, ollamaEmbeddingClient)
+    val actionPlannerMcp = ActionPlannerMcp()
 
     val localMcpProvider = LocalMcpProvider(
         listOf(
-            ActionPlannerMcp(),
+            actionPlannerMcp,
             WeatherMcp(httpClient, geolocationService),
-            SolarActivityMcp(httpClient, geolocationService),
-            ChatSummaryMcp(),
             reminderMcp,
-            supportTicketMcp,
             googlePlayPublisherMcp,
             AndroidStudioLocalMcp(),
             GitRepositoryMcp(),
-            helpMcp,
             logAnalyzerMcp
             )
     )
+
+    // Set LocalMcpProvider reference for ActionPlannerMcp to enable step execution
+    actionPlannerMcp.localMcpProvider = localMcpProvider
 
     // === Инициализация сервисов оптимизации ===
     val tokenMetricsService = TokenMetricsService()
     val toolsFilterService = ToolsFilterService()
 
     val mcpTools = MCPTools(localMcpProvider = localMcpProvider, remoteMcpProvider = remoteMcpProvider)
-
-    // Устанавливаем зависимости для HelpMcp после создания providers
-    helpMcp.localMcpProvider = localMcpProvider
-    helpMcp.remoteTools = remoteMcpProvider.getAllServers()
 
     // === Инициализация LLM провайдеров ===
 

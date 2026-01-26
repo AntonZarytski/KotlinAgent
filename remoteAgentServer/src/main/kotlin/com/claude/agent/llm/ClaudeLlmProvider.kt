@@ -56,7 +56,6 @@ class ClaudeLlmProvider(
         // Системный промпт будет сформирован внутри ClaudeClient через SystemPrompts.getSystemPrompt
         val response = claudeClient.sendMessage(
             userMessage = userMessage,
-            outputFormat = "default",
             model = model ?: ClaudeConfig.MODEL,
             maxTokens = maxTokens,
             specMode = false,

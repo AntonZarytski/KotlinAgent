@@ -1,6 +1,6 @@
 package com.claude.agent.cli
 
-import com.claude.agent.config.localModel
+import com.claude.agent.config.AppConfig.ollamaModel
 import com.claude.agent.llm.ClaudeClient
 import com.claude.agent.llm.ClaudeLlmProvider
 import com.claude.agent.llm.QwenLlmProvider
@@ -9,7 +9,6 @@ import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.llm.mcp.local.*
 import com.claude.agent.llm.mcp.providers.LocalMcpProvider
 import com.claude.agent.llm.mcp.providers.RemoteMcpProvider
-import com.claude.agent.llm.mcp.remote.AirTicketsMcp
 import com.claude.agent.service.*
 import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
@@ -92,14 +91,12 @@ class ServiceInitializer {
         httpClient: HttpClient,
         geolocationService: GeolocationService
     ): MCPTools {
-        val remoteMcpProvider = RemoteMcpProvider(listOf(AirTicketsMcp()))
+        val remoteMcpProvider = RemoteMcpProvider(emptyList())
 
         val localMcpProvider = LocalMcpProvider(
             listOf(
                 ActionPlannerMcp(),
                 WeatherMcp(httpClient, geolocationService),
-                SolarActivityMcp(httpClient, geolocationService),
-                ChatSummaryMcp(),
                 AndroidStudioLocalMcp(),
                 GitRepositoryMcp()
             )
@@ -180,7 +177,7 @@ class ServiceInitializer {
             mcpTools = mcpTools,
             webSocketService = webSocketService,
             baseUrl = "http://localhost:11434",
-            modelName = localModel
+            modelName = ollamaModel
         )
 
         // Выбираем провайдер (по умолчанию Claude для CLI)

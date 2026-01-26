@@ -201,7 +201,7 @@ class AndroidStudioLocalMcp : Mcp.Local {
 
             // Execute the command on the connected local agent
             val result = LocalAgentManager.executeOnLocalAgent(
-                toolName = "android_studio",
+                toolName = ANDROID_STUDIO_MCP,
                 arguments = arguments,
                 timeoutMs = timeoutMs
             )

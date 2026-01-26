@@ -82,7 +82,6 @@ class ClaudeClient(
      */
     suspend fun sendMessage(
         userMessage: String,
-        outputFormat: String = "default",
         model: String = ClaudeConfig.MODEL,
         maxTokens: Int = ClaudeConfig.MAX_TOKENS,
         specMode: Boolean = false,
@@ -128,9 +127,8 @@ class ClaudeClient(
 
             // Формируем системный промпт (для Claude используем подробные описания)
             val systemPrompt = SystemPrompts.getSystemPrompt(
-                outputFormat = outputFormat,
-                specMode = specMode,
                 enabledTools = enabledTools,
+                specMode = specMode,
                 isRagEnabled = isRagEnabled,
                 llmType = "claude"
             )

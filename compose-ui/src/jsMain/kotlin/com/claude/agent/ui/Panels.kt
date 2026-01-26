@@ -59,38 +59,6 @@ fun SettingsPanel(
                 property("scroll-behavior", "smooth")
             }
         }) {
-            // Output Format
-            Div({ style { property("margin-bottom", "24px") } }) {
-                Label(null, {
-                    style {
-                        property("display", "block")
-                        property("font-size", "14px")
-                        property("font-weight", "600")
-                        property("color", "#374151")
-                        property("margin-bottom", "8px")
-                    }
-                }) {
-                    Text("📋 Формат ответа")
-                }
-                Select({
-                    style {
-                        property("width", "100%")
-                        property("padding", "12px 16px")
-                        property("border", "2px solid #e5e7eb")
-                        property("border-radius", "12px")
-                        property("font-size", "14px")
-                    }
-                    onChange { event ->
-                        val value = (event.target as HTMLSelectElement).value
-                        onSettingsChange(settings.copy(outputFormat = value))
-                    }
-                }) {
-                    Option("default", { if (settings.outputFormat == "default") selected() }) { Text("По умолчанию (текст)") }
-                    Option("json", { if (settings.outputFormat == "json") selected() }) { Text("JSON") }
-                    Option("xml", { if (settings.outputFormat == "xml") selected() }) { Text("XML") }
-                }
-            }
-
             // Max Tokens
             Div({ style { property("margin-bottom", "24px") } }) {
                 Label(null, {
@@ -373,53 +341,7 @@ fun SettingsPanel(
                 }
             }
 
-            // Show Token Count
-            Div({ style { property("margin-bottom", "24px") } }) {
-                Label(null, {
-                    style {
-                        property("display", "flex")
-                        property("align-items", "center")
-                        property("gap", "12px")
-                        property("cursor", "pointer")
-                        property("padding", "12px 16px")
-                        property("background", "#f9fafb")
-                        property("border-radius", "12px")
-                    }
-                }) {
-                    CheckboxInput {
-                        checked(settings.showTokenCount)
-                        onInput { event ->
-                            val checked = (event.target as HTMLInputElement).checked
-                            onSettingsChange(settings.copy(showTokenCount = checked))
-                        }
-                    }
-                    Text("📊 Показывать количество токенов")
-                }
-            }
 
-            // Show Intermediate Messages
-            Div({ style { property("margin-bottom", "24px") } }) {
-                Label(null, {
-                    style {
-                        property("display", "flex")
-                        property("align-items", "center")
-                        property("gap", "12px")
-                        property("cursor", "pointer")
-                        property("padding", "12px 16px")
-                        property("background", "#f9fafb")
-                        property("border-radius", "12px")
-                    }
-                }) {
-                    CheckboxInput {
-                        checked(settings.showAllIntermediateMessages)
-                        onInput { event ->
-                            val checked = (event.target as HTMLInputElement).checked
-                            onSettingsChange(settings.copy(showAllIntermediateMessages = checked))
-                        }
-                    }
-                    Text("💬 Показывать все промежуточные сообщения")
-                }
-            }
 
             // === RAG Settings ===
             Div({

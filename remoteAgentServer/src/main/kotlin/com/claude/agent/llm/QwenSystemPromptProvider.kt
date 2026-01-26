@@ -68,24 +68,6 @@ class QwenSystemPromptProvider : SystemPromptProvider {
 - Будь конкретен
 - Если информации достаточно — сразу к результату"""
 
-    override fun getJsonFormatInstructions(): String = """
-Формат: JSON
-Структура:
-{
-  "answer": "твой ответ",
-  "metadata": {"confidence": 0.95}
-}
-"""
-
-    override fun getXmlFormatInstructions(): String = """
-Формат: XML
-Структура:
-<response>
-  <answer>твой ответ</answer>
-  <metadata><confidence>0.95</confidence></metadata>
-</response>
-"""
-
     override fun getRagPrompt(): String = """
 
 РАБОТА С ДОКУМЕНТАЦИЕЙ (RAG):

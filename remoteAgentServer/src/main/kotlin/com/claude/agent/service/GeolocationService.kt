@@ -23,8 +23,8 @@ class GeolocationService(private val httpClient: HttpClient) {
     private val defaultLocation = LocationData(
         latitude = 55.7558,
         longitude = 37.6173,
-        city = "Moscow",
-        country = "Russia"
+        city = "Warsaw",
+        country = "Poland"
     )
     
     /**

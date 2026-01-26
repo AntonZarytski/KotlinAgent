@@ -90,27 +90,6 @@ class ClaudeToolDescriptionProvider : ToolDescriptionProvider {
    {"latitude": 55.75, "longitude": 37.62, "units": "metric"}  // Москва
    {"units": "imperial"}  // Автоопределение по IP"""
 
-            SOLAR -> """
- - $SOLAR - получить данные о солнечной активности и вероятности наблюдения полярных сияний
-
-   ПАРАМЕТРЫ (все опциональные):
-   • latitude (number) - широта местоположения
-   • longitude (number) - долгота местоположения
-
-   АВТООПРЕДЕЛЕНИЕ: Если координаты не указаны, местоположение определяется автоматически по IP-адресу
-
-   ВОЗВРАЩАЕТ:
-   • kp_index - планетарный K-индекс (0-9, показатель геомагнитной активности)
-   • activity_level - уровень активности: "низкий" (< 4), "средний" (4-6), "высокий" (> 6)
-   • aurora_visibility_probability - вероятность видимости полярных сияний (0-100%)
-   • location_source - источник координат
-
-   ИСТОЧНИК ДАННЫХ: NOAA Planetary K-Index API
-
-   ПРИМЕРЫ:
-   {"latitude": 64.5, "longitude": -21.9}  // Рейкьявик, Исландия
-   {}  // Автоопределение по IP"""
-
             REMINDER -> """
  - $REMINDER - создать/удалить напоминание с поддержкой трех типов задач
 
@@ -160,16 +139,7 @@ class ClaudeToolDescriptionProvider : ToolDescriptionProvider {
 
    // Повторяющееся напоминание
    {"action": "add", "text": "Проверить почту", "due_at": "2024-01-22T09:00:00Z", "recurrence_type": "daily", "recurrence_interval": 1}"""
-            
-            CHAT_SUMMARY -> """
- - $CHAT_SUMMARY - получить краткое резюме текущего чата
-   Анализирует историю сообщений и возвращает краткое содержание"""
-            
-            AIR_TICKETS -> """
- - $AIR_TICKETS - поиск авиабилетов
-   Параметры: маршрут, даты, количество пассажиров, класс обслуживания
-   Возвращает доступные варианты перелетов с ценами"""
-            
+
             ANDROID_STUDIO_MCP -> """
  - $ANDROID_STUDIO_MCP - управление Android Studio, Android Emulator, ADB, Gradle и ЛОКАЛЬНОЙ ФАЙЛОВОЙ СИСТЕМОЙ
 
@@ -320,24 +290,7 @@ class ClaudeToolDescriptionProvider : ToolDescriptionProvider {
    - Список .kt файлов в ветке day_12: list_files_in_branch(branch="origin/day_12", file_extension=".kt")
    - Содержимое файла из ветки: show_file_from_branch(branch="origin/day_12", file_path="path/to/file.kt")
    - Сравнить ветки: compare_branches(branch="origin/day_12", target_branch="main")"""
-            
-            PROJECT_HELP -> """
- - $PROJECT_HELP - помощь по проекту
-   Пользователь может использовать команду /help для быстрого поиска информации в документации проекта.
-   Формат: /help [вопрос](опционально)
-   
-   Примеры:
-   - /help
-   - /help Как работает RAG?
-   - /help Как создать MCP tool?
-   - /help Правила стиля кода
-   
-   Эта команда автоматически использует RAG для поиска релевантной информации.
-   
-   ИНСТРУМЕНТ project_help:
-   При использовании инструмента project_help всегда давай конкретные ответы, только касающиеся вопроса, на основе найденного контекста.
-   Если пользователь вводит только /help без вопроса, то выводи подробную информацию по проекту."""
-            
+
             else -> " - $toolName - инструмент доступен"
         }
     }
@@ -450,12 +403,6 @@ class QwenToolDescriptionProvider : ToolDescriptionProvider {
   • units (string, опционально, default: "metric") - единицы измерения (metric/imperial)
 Если координаты не указаны - автоопределение по IP"""
 
-            SOLAR -> """✅ $SOLAR - солнечная активность и полярные сияния
-Параметры:
-  • latitude (number, опционально) - широта
-  • longitude (number, опционально) - долгота
-Возвращает: kp_index, activity_level, aurora_visibility_probability"""
-
             REMINDER -> """✅ $REMINDER - напоминания (3 типа: reminder, ai_response, mcp_tool)
 Параметры:
   • action (string, обязательно) - add/list/delete
@@ -466,9 +413,6 @@ class QwenToolDescriptionProvider : ToolDescriptionProvider {
   • recurrence_type (string, опционально) - minutely/hourly/daily/weekly/monthly
   • recurrence_interval (integer, опционально) - интервал повторения
   • recurrence_end_date (string, опционально) - дата окончания повторений"""
-
-            CHAT_SUMMARY -> "✅ $CHAT_SUMMARY - резюме чата"
-            AIR_TICKETS -> "✅ $AIR_TICKETS - поиск авиабилетов"
 
             ANDROID_STUDIO_MCP -> """✅ $ANDROID_STUDIO_MCP - Android Studio/ADB/Gradle/Файловая система
 Параметр action (обязательно):
@@ -510,7 +454,6 @@ class QwenToolDescriptionProvider : ToolDescriptionProvider {
   • session_id (string, опционально) - для WebSocket уведомлений"""
 
             GIT_REPOSITORY -> "✅ $GIT_REPOSITORY - git (get_status, get_diff, list_files_in_branch, show_file_from_branch)"
-            PROJECT_HELP -> "✅ $PROJECT_HELP - помощь по проекту"
             else -> "✅ $toolName"
         }
     }

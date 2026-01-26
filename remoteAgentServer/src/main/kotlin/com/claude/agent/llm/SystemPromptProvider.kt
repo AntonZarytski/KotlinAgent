@@ -20,17 +20,7 @@ interface SystemPromptProvider {
      * Возвращает системный промпт для режима сбора требований (spec mode)
      */
     fun getSpecModePrompt(): String
-    
-    /**
-     * Возвращает инструкции для формата JSON
-     */
-    fun getJsonFormatInstructions(): String
-    
-    /**
-     * Возвращает инструкции для формата XML
-     */
-    fun getXmlFormatInstructions(): String
-    
+
     /**
      * Возвращает промпт для работы с RAG контекстом
      */
@@ -90,37 +80,6 @@ class ClaudeSystemPromptProvider : SystemPromptProvider {
 - Не задавай вопросы ради вопросов.
 - Если пользователь дал достаточно информации — сразу переходи к результату.
 - Будь лаконичен и полезен."""
-
-    override fun getJsonFormatInstructions(): String = """
-Формат ответа: JSON
-
-Твой ответ должен быть валидным JSON-объектом.
-Используй следующую структуру:
-{
-  "answer": "Твой ответ здесь",
-  "metadata": {
-    "confidence": 0.95,
-    "sources": ["источник1", "источник2"]
-  }
-}
-"""
-
-    override fun getXmlFormatInstructions(): String = """
-Формат ответа: XML
-
-Твой ответ должен быть валидным XML-документом.
-Используй следующую структуру:
-<response>
-  <answer>Твой ответ здесь</answer>
-  <metadata>
-    <confidence>0.95</confidence>
-    <sources>
-      <source>источник1</source>
-      <source>источник2</source>
-    </sources>
-  </metadata>
-</response>
-"""
 
     override fun getRagPrompt(): String = """
 

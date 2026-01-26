@@ -52,10 +52,10 @@ fun Route.chatRoutes(
             val topK = request.top_k.coerceIn(1, 100)
             val contextWindow = request.context_window.coerceIn(512, 32768)
 
-            logger.info("Параметры: format=${request.output_format}, max_tokens=$maxTokens, " +
+            logger.info("Параметры: max_tokens=$maxTokens, " +
                     "spec_mode=${request.spec_mode}, history_len=${request.conversation_history.size}, " +
                     "temperature=$temperature, session_id=${request.session_id}, " +
-                    "enabled_tools=${request.enabled_tools}, show_intermediate=${request.show_intermediate_messages}")
+                    "enabled_tools=${request.enabled_tools}")
 
             // Сохраняем сообщение пользователя в БД
             if (request.session_id != null) {
@@ -147,9 +147,8 @@ $context
 
             // Формируем системный промпт с учетом типа LLM
             val systemPrompt = SystemPrompts.getSystemPrompt(
-                outputFormat = request.output_format,
-                specMode = request.spec_mode,
                 enabledTools = if (isHelpCommand) emptyList() else request.enabled_tools,
+                specMode = request.spec_mode,
                 isRagEnabled = false,
                 llmType = llmType
             )
@@ -230,14 +229,13 @@ $context
                 return@post
             }
 
-            logger.info("Подсчёт токенов: format=${request.output_format}, spec=${request.spec_mode}, " +
+            logger.info("Подсчёт токенов: spec=${request.spec_mode}, " +
                     "history_len=${request.conversation_history.size}")
             // Формируем системный промпт и сообщения
             val llmType = request.llm_provider ?: "claude"
             val systemPrompt = SystemPrompts.getSystemPrompt(
-                outputFormat = request.output_format,
-                specMode = request.spec_mode,
                 enabledTools = emptyList(),
+                specMode = request.spec_mode,
                 isRagEnabled = false,
                 llmType = llmType
             )

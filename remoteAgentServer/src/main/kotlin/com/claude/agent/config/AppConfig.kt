@@ -133,12 +133,21 @@ object AppConfig {
     }
 
     val ollamaModel: String by lazy {
-        getEnv("OLLAMA_MODEL") ?: "llama3.2"
+        getEnv("OLLAMA_MODEL") ?: "qwen2.5-coder:7b-instruct"
     }
 
     // === Logging Configuration ===
     val enableFileLogging: Boolean by lazy {
         getEnv("ENABLE_FILE_LOGGING")?.toBoolean() ?: true
+    }
+
+    // === User Profile Configuration ===
+    /**
+     * Путь к файлу профиля пользователя (опционально)
+     * По умолчанию ищется agent-profile.json в корне проекта
+     */
+    val userProfilePath: String? by lazy {
+        getEnv("AGENT_PROFILE_PATH")
     }
 
     init {
@@ -154,5 +163,12 @@ object AppConfig {
             logger.info("Ollama Model: $ollamaModel")
         }
         logger.info("================================")
+
+        // Инициализируем профиль пользователя
+        try {
+            UserProfileConfig.profile
+        } catch (e: Exception) {
+            logger.warn("Не удалось загрузить профиль пользователя: ${e.message}")
+        }
     }
 }

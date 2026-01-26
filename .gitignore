@@ -14,6 +14,10 @@ out/
 .env
 *.env
 
+# User Profile (персональные настройки)
+agent-profile.json
+
+
 # Database
 *.db
 conversations.db

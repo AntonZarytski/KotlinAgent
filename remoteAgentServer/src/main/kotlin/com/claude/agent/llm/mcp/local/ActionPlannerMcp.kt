@@ -3,15 +3,17 @@ package com.claude.agent.llm.mcp.local
 import com.claude.agent.common.LocalToolDefinition
 import com.claude.agent.llm.mcp.ACTION_PLANNER
 import com.claude.agent.llm.mcp.Mcp
+import com.claude.agent.llm.mcp.providers.LocalMcpProvider
 import com.claude.agent.models.UserLocation
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
 
 class ActionPlannerMcp() : Mcp.Local {
 
     private val logger = LoggerFactory.getLogger(ActionPlannerMcp::class.java)
+
+    // LocalMcpProvider will be set after initialization to avoid circular dependency
+    var localMcpProvider: LocalMcpProvider? = null
 
     override val tool: Pair<String, LocalToolDefinition> = Pair(
         first = ACTION_PLANNER,
@@ -121,35 +123,73 @@ class ActionPlannerMcp() : Mcp.Local {
         userLocation: UserLocation?,
         sessionId: String?
     ): String {
-        logger.info("plan_actions tool called")
+        logger.info("plan_actions tool called with arguments: $arguments")
 
-        return JsonObject(
-            mapOf(
-                "instruction" to JsonPrimitive(
-                    """
-                Проанализируй текущий запрос пользователя и историю чата.
+        // Parse goal and steps from arguments
+        val goal = arguments["goal"]?.jsonPrimitive?.content
+        val stepsArray = arguments["steps"]?.jsonArray
 
-                Сформируй JSON следующего вида:
+        if (goal == null || stepsArray == null) {
+            logger.error("Missing goal or steps in arguments")
+            return "Error: Missing required fields 'goal' or 'steps' in plan"
+        }
 
-                {
-                  "goal": "<основная цель пользователя>",
-                  "steps": [
-                    {
-                      "step": "Описание шага",
-                      "tool": "имя_mcp_инструмента",
-                      "arguments": { }
-                    }
-                  ]
+        if (localMcpProvider == null) {
+            logger.error("LocalMcpProvider is not set")
+            return "Error: ActionPlannerMcp is not properly initialized"
+        }
+
+        logger.info("Executing plan with goal: $goal, steps count: ${stepsArray.size}")
+
+        val results = mutableListOf<String>()
+        results.add("🎯 Goal: $goal\n")
+
+        // Execute each step sequentially
+        for ((index, stepElement) in stepsArray.withIndex()) {
+            val stepObj = stepElement.jsonObject
+            val stepDescription = stepObj["step"]?.jsonPrimitive?.content ?: "Step ${index + 1}"
+            val toolName = stepObj["tool"]?.jsonPrimitive?.content
+            val toolArguments = stepObj["arguments"]?.jsonObject ?: JsonObject(emptyMap())
+
+            if (toolName == null) {
+                logger.warn("Step ${index + 1} has no tool specified, skipping")
+                results.add("⚠️ Step ${index + 1}: Skipped (no tool specified)")
+                continue
+            }
+
+            logger.info("Executing step ${index + 1}/${ stepsArray.size}: $stepDescription using tool: $toolName")
+            results.add("📍 Step ${index + 1}: $stepDescription")
+
+            try {
+                // Call the tool via localMcpProvider
+                val tool = localMcpProvider?.getTool(toolName)
+                if (tool == null) {
+                    val errorMsg = "Tool '$toolName' not found"
+                    logger.error(errorMsg)
+                    results.add("   ❌ Error: $errorMsg\n")
+                    continue
                 }
 
-                Правила:
-                - Используй ТОЛЬКО доступные MCP инструменты
-                - Если шаг не требует MCP — не добавляй его
-                - Порядок шагов имеет значение
-                - Аргументы должны соответствовать input_schema инструмента
-                """.trimIndent()
+                val result = tool.executeTool(
+                    arguments = toolArguments,
+                    clientIp = clientIp,
+                    userLocation = userLocation,
+                    sessionId = sessionId
                 )
-            )
-        ).toString()
+
+                results.add("   ✅ Result: $result\n")
+                logger.info("Step ${index + 1} completed successfully")
+
+            } catch (e: Exception) {
+                val errorMsg = "Exception executing tool '$toolName': ${e.message}"
+                logger.error(errorMsg, e)
+                results.add("   ❌ Error: ${e.message}\n")
+            }
+        }
+
+        results.add("✨ Plan execution completed")
+
+        // Return aggregated results
+        return results.joinToString("\n")
     }
 }

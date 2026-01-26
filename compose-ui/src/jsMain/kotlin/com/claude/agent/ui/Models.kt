@@ -43,7 +43,6 @@ data class Reminder(
 )
 
 data class Settings(
-    val outputFormat: String = "default",
     val maxTokens: Int = 1024,
     val temperature: Float = 1.0f,
     val topP: Float = 0.9f,                     // Nucleus sampling (0.0-1.0)
@@ -51,9 +50,7 @@ data class Settings(
     val contextWindow: Int = 4096,              // Размер контекстного окна
     val specMode: Boolean = false,
     val sendHistory: Boolean = true,
-    val showTokenCount: Boolean = true,
-    val showAllIntermediateMessages: Boolean = true,
-    val enabledTools: Set<String> = setOf("plan_actions", "android_studio_mcp", "support_ticket_mcp"),  // По умолчанию включены (project_help отключен)
+    val enabledTools: Set<String> = setOf("plan_actions", "android_studio_mcp"),  // По умолчанию включены
     val useRag: Boolean = false,                // Использовать RAG для контекста
     val ragTopK: Int = 3,                       // Количество релевантных чанков
     val ragMinSimilarity: Float = 0.3f,         // Минимальный порог схожести (0.0-1.0)
@@ -65,7 +62,6 @@ data class Settings(
 data class ChatRequest(
     val message: String,
     val session_id: String,
-    val output_format: String = "default",
     val max_tokens: Int = 1024,
     val spec_mode: Boolean = false,
     val temperature: Float = 1.0f,
@@ -75,7 +71,6 @@ data class ChatRequest(
     val conversation_history: List<Message> = emptyList(),
     val enabled_tools: List<String> = emptyList(),
     val user_location: UserLocation? = null,
-    val show_intermediate_messages: Boolean = true,
     val use_rag: Boolean = false,               // Использовать RAG для контекста
     val rag_top_k: Int = 3,                     // Количество релевантных чанков
     val rag_min_similarity: Double = 0.3,       // Минимальный порог схожести (0.0-1.0)
@@ -104,7 +99,6 @@ data class ChatResponse(
 @Serializable
 data class TokenCountRequest(
     val message: String,
-    val output_format: String = "default",
     val spec_mode: Boolean = false,
     val conversation_history: List<Message> = emptyList()
 )

@@ -1,0 +1,51 @@
+{
+  "user": {
+    "name": "Антон",
+    "role": "Senior Android Developer",
+    "timezone": "Europe/Warsaw",
+    "language": "ru"
+  },
+  "preferences": {
+    "communicationStyle": "direct",
+    "codeStyle": "kotlin_official",
+    "verbosity": "medium",
+    "emojiUsage": true,
+    "codeExampleFormat": "separate",
+    "explainCode": true
+  },
+  "workContext": {
+    "primaryProjects": [
+      "KotlinAgent",
+      "SecretChat"
+    ],
+    "techStack": [
+      "Kotlin",
+      "Compose",
+      "Ktor",
+      "Android",
+      "Coroutines"
+    ],
+    "favoriteTools": [
+      "Android Studio",
+      "Git",
+      "Gradle"
+    ],
+    "currentFocus": "Разработка AI агента с персонализацией",
+    "expertiseLevel": "advanced"
+  },
+  "habits": {
+    "workHours": "10:00-19:00",
+    "breakReminders": true,
+    "taskManagementStyle": "agile",
+    "preferredSessionLength": 90,
+    "peakProductivityTime": "morning"
+  },
+  "customInstructions": [
+    "Всегда отвечай на русском языке",
+    "Предпочитаю краткие ответы с примерами кода",
+    "Использую Kotlin Coroutines вместо RxJava",
+    "Следуй официальному Kotlin code style",
+    "Используй Jetpack Compose для UI"
+  ]
+}
+

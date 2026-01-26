@@ -597,7 +597,6 @@ fun ClaudeChatApp() {
                             val response = ApiClient.countTokens(
                                 TokenCountRequest(
                                     message = inputText,
-                                    output_format = settings.outputFormat,
                                     spec_mode = settings.specMode,
                                     conversation_history = historyToSend
                                 )
@@ -624,7 +623,6 @@ fun ClaudeChatApp() {
             ChatMessages(
                 messages = messages,
                 isLoading = isLoading,
-                showTokenCount = settings.showTokenCount,
                 streamingText = streamingText,
                 toolResults = toolResults
             )
@@ -765,7 +763,6 @@ private suspend fun sendMessage(
             ChatRequest(
                 message = text,
                 session_id = currentSessionId,
-                output_format = settings.outputFormat,
                 max_tokens = settings.maxTokens,
                 spec_mode = settings.specMode,
                 temperature = settings.temperature,
@@ -775,7 +772,6 @@ private suspend fun sendMessage(
                 conversation_history = historyToSend,
                 enabled_tools = settings.enabledTools.toList(),
                 user_location = location,
-                show_intermediate_messages = settings.showAllIntermediateMessages,
                 use_rag = settings.useRag,
                 rag_top_k = settings.ragTopK,
                 rag_min_similarity = settings.ragMinSimilarity.toDouble(),
@@ -809,63 +805,27 @@ private suspend fun sendMessage(
                 )
             }
 
-            // Handle intermediate messages based on settings
+            // Handle intermediate messages - always show all in chat history
             if (response.intermediate_messages.isNotEmpty()) {
-                if (settings.showAllIntermediateMessages) {
-                    // Show all intermediate messages in chat history (marked as intermediate)
-                    response.intermediate_messages.forEach { intermediateMsg ->
-                        updatedMessages = updatedMessages + Message(
-                            role = intermediateMsg.role,
-                            content = "🔄 " + intermediateMsg.content,
-                            timestamp = Date().toISOString(),
-                            is_intermediate = true  // Помечаем как промежуточное
-                        )
-                    }
-
-                    // Add final response
+                // Show all intermediate messages in chat history (marked as intermediate)
+                response.intermediate_messages.forEach { intermediateMsg ->
                     updatedMessages = updatedMessages + Message(
-                        role = "assistant",
-                        content = response.reply,
+                        role = intermediateMsg.role,
+                        content = "🔄 " + intermediateMsg.content,
                         timestamp = Date().toISOString(),
-                        usage = response.usage,
-                        is_intermediate = false
+                        is_intermediate = true  // Помечаем как промежуточное
                     )
-                    onMessagesUpdate(updatedMessages)
-                } else {
-                    // Show intermediate messages one by one, replacing each other
-                    // НЕ добавляем их в историю, только показываем временно
-                    coroutineScope {
-                        launch {
-                            response.intermediate_messages.forEachIndexed { index, intermediateMsg ->
-                                // Создаем временное сообщение (не добавляем в updatedMessages)
-                                val tempMessages = updatedMessages + Message(
-                                    role = intermediateMsg.role,
-                                    content = "🔄 " + intermediateMsg.content,
-                                    timestamp = Date().toISOString(),
-                                    is_intermediate = true
-                                )
-                                onMessagesUpdate(tempMessages)
-
-                                // Wait a bit before showing next message (except for the last one)
-                                if (index < response.intermediate_messages.size - 1) {
-                                    delay(800)
-                                }
-                            }
-
-                            // Show final response after last intermediate message
-                            // Очищаем промежуточные сообщения и показываем только финальный ответ
-                            delay(500)
-                            updatedMessages = updatedMessages + Message(
-                                role = "assistant",
-                                content = response.reply,
-                                timestamp = Date().toISOString(),
-                                usage = response.usage,
-                                is_intermediate = false
-                            )
-                            onMessagesUpdate(updatedMessages)
-                        }
-                    }
                 }
+
+                // Add final response
+                updatedMessages = updatedMessages + Message(
+                    role = "assistant",
+                    content = response.reply,
+                    timestamp = Date().toISOString(),
+                    usage = response.usage,
+                    is_intermediate = false
+                )
+                onMessagesUpdate(updatedMessages)
             } else {
                 // No intermediate messages, just add the response
                 updatedMessages = updatedMessages + Message(

@@ -89,7 +89,6 @@ fun ChatHeader(
 fun ChatMessages(
     messages: List<Message>,
     isLoading: Boolean,
-    showTokenCount: Boolean,
     streamingText: String? = null,
     toolResults: List<ToolResultData> = emptyList()
 ) {
@@ -102,7 +101,7 @@ fun ChatMessages(
 
     Div({ classes("chat"); id("chat") }) {
         messages.forEach { message ->
-            MessageItem(message, showTokenCount)
+            MessageItem(message)
         }
 
         // Show tool results (intermediate tool execution messages)
@@ -132,7 +131,7 @@ fun ChatMessages(
 }
 
 @Composable
-fun MessageItem(message: Message, showTokenCount: Boolean) {
+fun MessageItem(message: Message) {
     val isUser = message.role == "user"
 
     Div({
@@ -162,7 +161,7 @@ fun MessageItem(message: Message, showTokenCount: Boolean) {
                 }
 
                 // Токены внутри сообщения (только для ассистента)
-                if (!isUser && showTokenCount && message.usage != null) {
+                if (!isUser && message.usage != null) {
                     val total = message.usage.input_tokens + message.usage.output_tokens
                     Div({
                         style {
