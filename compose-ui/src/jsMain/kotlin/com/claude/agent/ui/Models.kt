@@ -42,6 +42,16 @@ data class Reminder(
     val recurrenceInterval: Int? = null
 )
 
+@Serializable
+data class VoiceChatResponse(
+    val recognized_text: String,  // snake_case для соответствия серверу
+    val reply: String,             // "reply" вместо "response"
+    val usage: TokenUsage? = null,
+    val compressed_history: List<Message>? = null,
+    val compression_applied: Boolean = false,
+    val intermediate_messages: List<Message> = emptyList()
+)
+
 data class Settings(
     val maxTokens: Int = 1024,
     val temperature: Float = 1.0f,

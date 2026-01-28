@@ -1,6 +1,10 @@
 package com.claude.agent.ui
 
 import androidx.compose.runtime.*
+import com.claude.agent.ui.Utils.createMediaRecorder
+import com.claude.agent.ui.Utils.isMediaRecorderSupported
+import com.claude.agent.ui.Utils.requestMicrophoneAccess
+import com.claude.agent.ui.Utils.stopMediaStream
 import kotlinx.browser.window
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -49,6 +53,12 @@ fun ClaudeChatApp() {
 
     // Track which reminders have been notified to avoid duplicate notifications
     val notifiedReminders = remember { mutableSetOf<String>() }
+
+    // Voice recording state
+    var isRecording by remember { mutableStateOf(false) }
+    var mediaStream by remember { mutableStateOf<dynamic>(null) }
+    var mediaRecorder by remember { mutableStateOf<dynamic>(null) }
+    var audioChunks by remember { mutableStateOf<List<dynamic>>(emptyList()) }
 
     val scope = rememberCoroutineScope()
     val json = remember {
@@ -214,6 +224,123 @@ fun ClaudeChatApp() {
             }
         } catch (e: Exception) {
             console.error("Failed to connect to global WebSocket:", e.message)
+        }
+    }
+
+    // Voice recording functions
+    suspend fun startRecording() {
+        try {
+            // Check if MediaRecorder is supported
+            if (!isMediaRecorderSupported()) {
+                console.error("MediaRecorder API is not supported in this browser")
+                return
+            }
+
+            // 🔥 КРИТИЧНО: Очищаем старые chunks перед началом новой записи!
+            audioChunks = emptyList()
+            console.log("🧹 Audio chunks cleared before recording")
+
+            // Request microphone access
+            val stream = requestMicrophoneAccess()
+            mediaStream = stream
+
+            // Create MediaRecorder
+            val recorder = createMediaRecorder(stream) { chunk ->
+                // Collect audio chunks
+                audioChunks = audioChunks + listOf(chunk)
+            }
+            mediaRecorder = recorder
+
+            // Start recording
+            recorder.start()
+            isRecording = true
+            console.log("Recording started")
+        } catch (e: Exception) {
+            console.error("Failed to start recording:", e.message)
+            isRecording = false
+        }
+    }
+
+    suspend fun sendVoiceMessage(audioBlob: dynamic) {
+        try {
+            isLoading = true
+            // Очищаем промежуточные сообщения перед началом нового запроса
+            streamingText = null
+            streamingIteration = 0
+            toolResults = emptyList()
+
+            // 🔥 ШАГ 1: Сначала отправляем аудио на сервер для распознавания
+            // (НЕ добавляем userMessage в UI, потому что ещё не знаем текст!)
+            console.log("📤 Sending audio to server for recognition...")
+            val response = ApiClient.sendVoiceMessage(
+                audioBlob = audioBlob,
+                sessionId = currentSessionId,
+                llmProvider = settings.llmProvider
+            )
+
+            // 🔥 ШАГ 2: СРАЗУ добавляем сообщение пользователя в UI
+            // (ДО того как сервер начнёт генерировать ответ через LLM)
+            val userMessage = Message(
+                role = "user",
+                content = response.recognized_text,
+                timestamp = Date().toISOString()
+            )
+            messages = messages + userMessage
+            console.log("✅ User message added FIRST: ${response.recognized_text}")
+
+            // Прокручиваем к новому сообщению
+            scope.launch {
+                delay(100)
+                Utils.scrollToBottom()
+            }
+
+            // 🔥 ШАГ 3: WebSocket отправит финальный ответ ассистента через onNewMessageCallback
+            // Поэтому здесь НЕ добавляем ответ ассистента вручную
+
+            isLoading = false
+            // Очищаем промежуточные сообщения после завершения
+            streamingText = null
+            streamingIteration = 0
+            toolResults = emptyList()
+        } catch (e: Exception) {
+            console.error("Failed to send voice message:", e.message)
+            isLoading = false
+            streamingText = null
+            streamingIteration = 0
+            toolResults = emptyList()
+        }
+    }
+
+    suspend fun stopRecording() {
+        try {
+            // Stop the MediaRecorder
+            mediaRecorder?.stop()
+
+            // Stop the MediaStream
+            val stream = mediaStream
+            if (stream != null) {
+                stopMediaStream(stream)
+            }
+
+            // Create audio blob from chunks
+            // Convert Kotlin list to JavaScript array
+            val chunksArray = audioChunks.toTypedArray().asDynamic()
+            val audioBlob = js("new Blob(chunksArray, { type: 'audio/webm' })")
+
+            // Clear state
+            audioChunks = emptyList()
+            mediaStream = null
+            mediaRecorder = null
+            isRecording = false
+            console.log("Recording stopped")
+
+            // Send voice message in coroutine
+            scope.launch {
+                sendVoiceMessage(audioBlob)
+            }
+        } catch (e: Exception) {
+            console.error("Failed to stop recording:", e.message)
+            isRecording = false
         }
     }
 
@@ -652,7 +779,20 @@ fun ClaudeChatApp() {
                         )
                     }
                 },
-                enabled = !isLoading
+                enabled = !isLoading,
+                isRecording = isRecording,
+                onVoiceRecordStart = {
+                    console.log("🎤 Voice record start button clicked")
+                    scope.launch {
+                        startRecording()
+                    }
+                },
+                onVoiceRecordStop = {
+                    console.log("⏹️ Voice record stop button clicked")
+                    scope.launch {
+                        stopRecording()
+                    }
+                },
             )
         }
 

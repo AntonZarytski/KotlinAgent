@@ -99,6 +99,33 @@ object ApiClient {
         }
     }
 
+    suspend fun sendVoiceMessage(
+        audioBlob: dynamic,
+        sessionId: String,
+        llmProvider: String?
+    ): VoiceChatResponse {
+        // Логируем реальный MIME-тип и размер Blob
+        val blobType = audioBlob.type as? String ?: "unknown"
+        val blobSize = audioBlob.size as? Int ?: 0
+        console.log("📤 Отправка аудио: type='$blobType', size=$blobSize байт")
+
+        val formData = js("new FormData()")
+        formData.append("audio", audioBlob, "recording.webm")
+
+        val params = js("{}")
+        params.session_id = sessionId  // snake_case для соответствия серверной модели
+        params.llm_provider = llmProvider
+        formData.append("params", JSON.stringify(params))
+
+        val response = window.fetch(
+            "$baseUrl/api/voice/chat",
+            RequestInit(method = "POST", body = formData)
+        ).await()
+
+        val text = response.text().await()
+        return jsonParser.decodeFromString<VoiceChatResponse>(text)
+    }
+
     suspend fun getSessions(): SessionsResponse {
         return get("/api/sessions") { text ->
             jsonParser.decodeFromString<SessionsResponse>(text)

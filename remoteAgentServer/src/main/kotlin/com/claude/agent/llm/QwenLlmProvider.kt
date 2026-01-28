@@ -758,21 +758,19 @@ class QwenLlmProvider(
                     return Triple(cleanedResponse, totalTokens, intermediateMessages)
                 }
 
-                // Отправляем промежуточное сообщение через WebSocket
-                if (sessionId != null && showIntermediateMessages) {
+                // Отправляем финальное сообщение через WebSocket
+                if (sessionId != null) {
                     try {
                         val messageData = buildJsonObject {
                             put("role", "assistant")
                             put("content", assistantMessage.content)
-                            put("is_intermediate", false)
-                            put("iteration", iteration)
                             put("timestamp", System.currentTimeMillis())
                         }
 
                         webSocketService.broadcastToSession(
                             sessionId = sessionId,
                             message = WebSocketMessage(
-                                type = "streaming_text",
+                                type = "new_message",  // Финальное сообщение!
                                 sessionId = sessionId,
                                 data = Json.encodeToString(messageData)
                             )

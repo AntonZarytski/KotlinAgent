@@ -33,6 +33,13 @@ dependencies {
 
     // Google Play Publisher API
     implementation(libs.bundles.googlePlay)
+
+    // Speech Recognition (Vosk)
+    implementation(libs.vosk)
+
+    // JAVE2 for audio conversion (WebM to WAV)
+    implementation("ws.schild:jave-core:3.5.0")
+    implementation("ws.schild:jave-nativebin-osxm1:3.5.0") // macOS arm64
 }
 
 application {

@@ -14,6 +14,7 @@ googleApiClient = "2.2.0"
 googleHttpClient = "1.44.1"
 googleAuthLibrary = "1.19.0"
 googlePlayPublisher = "v3-rev20251215-2.0.0"
+vosk = "0.3.38"
 
 [libraries]
 kotlinGradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -56,6 +57,9 @@ pdfbox = { module = "org.apache.pdfbox:pdfbox", version = "pdfBox" }
 
 # Config
 dotenv = { module = "io.github.cdimascio:dotenv-kotlin", version.ref = "dotenv" }
+
+# Speech Recognition
+vosk = { module = "com.alphacephei:vosk", version.ref = "vosk" }
 
 # Google Play Publisher API
 googleApiClient = { module = "com.google.api-client:google-api-client", version.ref = "googleApiClient" }

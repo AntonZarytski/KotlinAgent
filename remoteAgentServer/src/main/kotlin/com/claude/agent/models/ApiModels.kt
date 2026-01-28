@@ -168,3 +168,35 @@ data class Reminder(
     val taskType: String = "reminder", // reminder, ai_response, mcp_tool
     val taskContext: String? = null // JSON with task details
 )
+
+// === POST /api/voice/chat ===
+@Serializable
+data class VoiceChatRequest(
+    val session_id: String? = null,
+    val max_tokens: Int = 1024,
+    val temperature: Double = 1.0,
+    val top_p: Double = 0.9,
+    val top_k: Int = 40,
+    val context_window: Int = 4096,
+    val spec_mode: Boolean = false,
+    val conversation_history: List<Message> = emptyList(),
+    val enabled_tools: List<String> = emptyList(),
+    val user_location: UserLocation? = null,
+    val show_intermediate_messages: Boolean = true,
+    val use_rag: Boolean = false,
+    val rag_top_k: Int = 3,
+    val rag_min_similarity: Double = 0.3,
+    val rag_filter_enabled: Boolean = true,
+    val selected_files: List<String> = emptyList(),
+    val llm_provider: String? = null
+)
+
+@Serializable
+data class VoiceChatResponse(
+    val recognized_text: String,
+    val reply: String,
+    val usage: TokenUsage? = null,
+    val compressed_history: List<Message>? = null,
+    val compression_applied: Boolean = false,
+    val intermediate_messages: List<Message> = emptyList()
+)

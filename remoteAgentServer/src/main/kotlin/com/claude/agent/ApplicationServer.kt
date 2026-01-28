@@ -21,6 +21,7 @@ import com.claude.agent.service.GeolocationService
 import com.claude.agent.service.HistoryCompressor
 import com.claude.agent.service.TokenMetricsService
 import com.claude.agent.service.ToolsFilterService
+import com.claude.agent.service.SpeechRecognitionService
 import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.llm.mcp.local.ActionPlannerMcp
 import com.claude.agent.llm.mcp.providers.RemoteMcpProvider
@@ -472,6 +473,39 @@ fun Application.module() {
 
     val historyCompressor = HistoryCompressor(defaultLlmProvider, tokenMetricsService)
 
+    // === Настройка JNA library path для Vosk нативных библиотек ===
+    val voskLibPath = "${System.getProperty("user.dir")}/lib/vosk/vosk-osx-0.3.38"
+    System.setProperty("jna.library.path", voskLibPath)
+    logger.info("JNA library path set to: $voskLibPath")
+
+    // === Инициализация Speech Recognition Service (опционально) ===
+    val speechRecognitionService = try {
+        val modelPath = AppConfig.getEnv("SPEECH_MODEL_PATH")
+        if (modelPath != null) {
+            logger.info("✅ Initializing Speech Recognition Service...")
+            logger.info("   Model path: $modelPath")
+            SpeechRecognitionService(modelPath = modelPath).also {
+                if (it.isModelLoaded()) {
+                    logger.info("✅ Speech Recognition Service initialized successfully")
+                    logger.info("   ${it.getModelInfo()}")
+                } else {
+                    logger.warn("⚠️ Speech Recognition model not loaded")
+                }
+            }
+        } else {
+            logger.info("⚠️ Speech Recognition disabled (SPEECH_MODEL_PATH not set)")
+            null
+        }
+    } catch (e: Exception) {
+        logger.error("❌ Failed to initialize Speech Recognition: ${e.message}")
+        logger.error("   Скачайте модель с https://alphacephei.com/vosk/models")
+        logger.error("   Рекомендуемые модели:")
+        logger.error("   - Русский: vosk-model-ru-0.42")
+        logger.error("   - Английский: vosk-model-en-us-0.22")
+        logger.error("   - Мультиязычная: vosk-model-small-ru-0.22 + vosk-model-small-en-us-0.15")
+        null
+    }
+
     reminderService.llmProvider = defaultLlmProvider
     reminderService.mcpTools = mcpTools
     reminderMcp.llmProvider = defaultLlmProvider
@@ -485,6 +519,7 @@ fun Application.module() {
     logger.info("  - Prompt Caching: ${PromptCachingConfig.ENABLED}")
     logger.info("  - Tools Filtering: ${ToolsFilteringConfig.ENABLED}")
     logger.info("  - History Compression: ENABLED")
+    logger.info("Speech Recognition: ${if (speechRecognitionService != null) "ENABLED" else "DISABLED"}")
     logger.info("================================")
 
     // === Конфигурация Ktor ===
@@ -571,7 +606,9 @@ fun Application.module() {
             llmProviderFactory = llmProviderFactory,
             mcpTools = mcpTools,
             historyCompressor = historyCompressor,
-            repository = repository
+            repository = repository,
+            speechRecognitionService = speechRecognitionService,
+            webSocketService = webSocketService
         )
 
         // Session management

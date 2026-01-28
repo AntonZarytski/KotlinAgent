@@ -7,16 +7,24 @@ import com.claude.agent.llm.LlmProviderFactory
 import com.claude.agent.llm.SystemPrompts
 import com.claude.agent.llm.mcp.MCPTools
 import com.claude.agent.service.HistoryCompressor
+import com.claude.agent.service.SpeechRecognitionService
+import com.claude.agent.service.WebSocketService
+import com.claude.agent.service.WebSocketMessage
 import io.ktor.http.*
+import io.ktor.http.content.*
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.slf4j.LoggerFactory
+import java.io.File
 
 /**
  * Роуты для работы с чатом.
@@ -27,7 +35,9 @@ fun Route.chatRoutes(
     llmProviderFactory: LlmProviderFactory,
     mcpTools: MCPTools,
     historyCompressor: HistoryCompressor,
-    repository: ConversationRepository
+    repository: ConversationRepository,
+    speechRecognitionService: SpeechRecognitionService? = null,
+    webSocketService: WebSocketService
 ) {
     val logger = LoggerFactory.getLogger("ChatRoutes")
 
@@ -278,4 +288,332 @@ $context
             call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Ошибка сервера: ${e.message}"))
         }
     }
+
+    /**
+     * POST /api/voice/chat - голосовой чат с распознаванием речи
+     *
+     * Принимает аудио файл, распознает речь и отправляет текст в LLM
+     */
+    post("/api/voice/chat") {
+        try {
+            if (speechRecognitionService == null) {
+                call.respond(
+                    HttpStatusCode.ServiceUnavailable,
+                    ErrorResponse("Сервис распознавания речи не настроен. Проверьте конфигурацию SPEECH_MODEL_PATH в .env")
+                )
+                return@post
+            }
+
+            logger.info("Получен запрос на /api/voice/chat")
+
+            // Получаем multipart данные
+            val multipart = call.receiveMultipart()
+            var audioFile: File? = null
+            var requestParams: VoiceChatRequest? = null
+
+            multipart.forEachPart { part ->
+                when (part) {
+                    is PartData.FileItem -> {
+                        // Сохраняем аудио файл во временную директорию
+                        val originalFileName = part.originalFileName
+                        val contentType = part.contentType?.toString()
+
+                        val suffix = when {
+                            contentType?.contains("webm", ignoreCase = true) == true ||
+                                originalFileName?.endsWith(".webm", ignoreCase = true) == true -> ".webm"
+                            contentType?.contains("wav", ignoreCase = true) == true ||
+                                originalFileName?.endsWith(".wav", ignoreCase = true) == true -> ".wav"
+                            contentType?.contains("ogg", ignoreCase = true) == true ||
+                                originalFileName?.endsWith(".ogg", ignoreCase = true) == true -> ".ogg"
+                            contentType?.contains("mpeg", ignoreCase = true) == true ||
+                                originalFileName?.endsWith(".mp3", ignoreCase = true) == true -> ".mp3"
+                            else -> ".bin"
+                        }
+
+                        // Если вдруг прилетит несколько file-part'ов, не оставляем мусор
+                        audioFile?.delete()
+                        audioFile = File.createTempFile("voice_", suffix)
+
+                        logger.info(
+                            "Получен аудио part: originalFileName=$originalFileName, contentType=$contentType, savedAs=${audioFile!!.name}"
+                        )
+                        part.streamProvider().use { input ->
+                            audioFile!!.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        val headerBytes = readFirstBytes(audioFile!!, 32)
+                        val headerHex = toHex(headerBytes)
+                        val detected = detectAudioContainer(headerBytes)
+                        logger.info(
+                            "Получен аудио файл: ${audioFile!!.length()} байт, header=${headerHex}, detected=${detected}"
+                        )
+                    }
+                    is PartData.FormItem -> {
+                        // Парсим параметры запроса из JSON
+                        if (part.name == "params") {
+                            requestParams = kotlinx.serialization.json.Json.decodeFromString<VoiceChatRequest>(part.value)
+                        }
+                    }
+                    else -> {}
+                }
+                part.dispose()
+            }
+
+            // Валидация
+            if (audioFile == null) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("Аудио файл не предоставлен"))
+                return@post
+            }
+
+            if (requestParams == null) {
+                requestParams = VoiceChatRequest() // Используем параметры по умолчанию
+            }
+
+            val request = requestParams!!
+
+            // Валидация размера файла (максимум 10 МБ)
+            val maxFileSize = 10 * 1024 * 1024 // 10 MB
+            if (audioFile!!.length() > maxFileSize) {
+                audioFile!!.delete()
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("Аудио файл слишком большой (максимум 10 МБ)"))
+                return@post
+            }
+
+            // Распознаем речь с таймаутом и валидацией
+            val recognizedText = try {
+                // Таймаут 60 секунд, максимальная длительность аудио 60 секунд
+                speechRecognitionService.recognizeFromFile(
+                    audioFile = audioFile!!,
+                    timeoutMs = 60000,
+                    maxDurationSeconds = 60.0
+                )
+            } catch (e: com.claude.agent.service.SpeechRecognitionException) {
+                logger.error("Ошибка распознавания речи: ${e.message}", e)
+                audioFile!!.delete()
+
+                // Определяем тип ошибки и возвращаем соответствующий HTTP статус
+                val (statusCode, errorMessage) = when {
+                    e.message?.contains("Неверный формат WAV", ignoreCase = true) == true ||
+                    e.message?.contains("ожидается WAV", ignoreCase = true) == true ||
+                    e.message?.contains("RIFF", ignoreCase = true) == true ||
+                    e.message?.contains("WAVE", ignoreCase = true) == true ||
+                    e.message?.contains("Конвертация не дала WAV", ignoreCase = true) == true ||
+                    e.message?.contains("Аудио формат должен быть PCM", ignoreCase = true) == true ||
+                    e.message?.contains("Частота дискретизации должна быть 16000 Hz", ignoreCase = true) == true ||
+                    e.message?.contains("Аудио должно быть моно", ignoreCase = true) == true ||
+                    e.message?.contains("Разрядность должна быть 16 бит", ignoreCase = true) == true -> {
+                        HttpStatusCode.BadRequest to "Неверный формат аудио. Требуется: WAV, 16kHz, моно, 16-бит PCM. ${e.message}"
+                    }
+                    e.message?.contains("Аудио слишком длинное") == true -> {
+                        HttpStatusCode.BadRequest to "Аудио файл слишком длинный. ${e.message}"
+                    }
+                    e.message?.contains("Превышено время ожидания") == true -> {
+                        HttpStatusCode.RequestTimeout to "Превышено время ожидания распознавания речи. Попробуйте с более коротким аудио."
+                    }
+                    e.message?.contains("Модель не загружена") == true -> {
+                        HttpStatusCode.ServiceUnavailable to "Модель распознавания речи не загружена. ${e.message}"
+                    }
+                    else -> {
+                        HttpStatusCode.InternalServerError to "Ошибка распознавания речи: ${e.message}"
+                    }
+                }
+
+                call.respond(statusCode, ErrorResponse(errorMessage))
+                return@post
+            } catch (e: Exception) {
+                logger.error("Неожиданная ошибка при распознавании речи: ${e.message}", e)
+                audioFile!!.delete()
+                call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Неожиданная ошибка: ${e.message}"))
+                return@post
+            } finally {
+                // Удаляем временный файл
+                audioFile?.delete()
+            }
+
+            if (recognizedText.isBlank()) {
+                call.respond(HttpStatusCode.BadRequest, ErrorResponse("Не удалось распознать речь. Попробуйте говорить четче."))
+                return@post
+            }
+
+            logger.info("Распознанный текст: '$recognizedText'")
+
+            // Сохраняем распознанное сообщение пользователя в БД
+            if (request.session_id != null) {
+                repository.saveMessage(request.session_id, "user", recognizedText)
+            }
+
+            // 🔥 КРИТИЧНО: Сразу возвращаем recognized_text клиенту
+            // (чтобы UI мог показать сообщение пользователя ДО ответа ассистента)
+            val immediateResponse = VoiceChatResponse(
+                recognized_text = recognizedText,
+                reply = "",  // Пустой reply - финальный ответ придёт через WebSocket
+                usage = null,
+                compressed_history = null,
+                compression_applied = false,
+                intermediate_messages = emptyList()
+            )
+            call.respond(HttpStatusCode.OK, immediateResponse)
+            logger.info("✅ Recognized text sent to client immediately")
+
+            // 🔥 Запускаем LLM генерацию АСИНХРОННО (не блокируем HTTP response)
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    // Получаем IP клиента
+                    val clientIp = call.request.origin.remoteHost
+
+                    // Валидация параметров
+                    val maxTokens = request.max_tokens.coerceIn(128, 8192)
+                    val temperature = request.temperature.coerceIn(0.0, 2.0)
+                    val topP = request.top_p.coerceIn(0.0, 1.0)
+                    val topK = request.top_k.coerceIn(1, 100)
+                    val contextWindow = request.context_window.coerceIn(512, 32768)
+
+                    // Сжимаем историю при необходимости
+                    var conversationHistory = request.conversation_history
+                    val originalHistoryLen = conversationHistory.size
+                    var compressionApplied = false
+
+                    if (historyCompressor.shouldCompress(conversationHistory)) {
+                        logger.info("Начинаем сжатие истории ($originalHistoryLen сообщений)...")
+                        conversationHistory = historyCompressor.compressHistory(conversationHistory)
+                        compressionApplied = true
+                        logger.info("История сжата: $originalHistoryLen -> ${conversationHistory.size} сообщений")
+                    }
+
+                    val messages = mutableListOf<Message>()
+                    messages.addAll(conversationHistory)
+                    messages.add(Message("user", recognizedText))
+
+                    // Выбираем LLM провайдер
+                    val llmProvider = llmProviderFactory.getProvider(request.llm_provider)
+                    val llmType = request.llm_provider ?: "claude"
+                    logger.info("Using LLM provider: ${llmProvider.getProviderName()}, type: $llmType")
+
+                    // Формируем системный промпт
+                    val systemPrompt = SystemPrompts.getSystemPrompt(
+                        enabledTools = request.enabled_tools,
+                        specMode = request.spec_mode,
+                        isRagEnabled = false,
+                        llmType = llmType
+                    )
+
+                    // Вызываем LLM провайдер (финальный ответ отправится через WebSocket)
+                    val llmResponse = llmProvider.generate(
+                        systemPrompt = systemPrompt,
+                        messages = messages,
+                        model = null,
+                        maxTokens = maxTokens,
+                        temperature = temperature,
+                        topP = topP,
+                        topK = topK,
+                        contextWindow = contextWindow,
+                        enabledTools = request.enabled_tools,
+                        clientIp = clientIp,
+                        userLocation = request.user_location,
+                        sessionId = request.session_id,
+                        showIntermediateMessages = request.show_intermediate_messages,
+                        useRag = request.use_rag,
+                        ragTopK = request.rag_top_k,
+                        ragMinSimilarity = request.rag_min_similarity,
+                        ragFilterEnabled = request.rag_filter_enabled,
+                        selectedFiles = request.selected_files
+                    )
+
+                    // Обработка ошибок
+                    if (llmResponse.error != null) {
+                        logger.error("Ошибка от LLM: ${llmResponse.error}")
+                        // Отправляем ошибку через WebSocket
+                        if (request.session_id != null) {
+                            webSocketService.broadcastToSession(
+                                sessionId = request.session_id,
+                                message = WebSocketMessage(
+                                    type = "error",
+                                    sessionId = request.session_id,
+                                    data = """{"error": "${llmResponse.error}"}"""
+                                )
+                            )
+                        }
+                        return@launch
+                    }
+
+                    // Сохраняем ответ ассистента в БД
+                    if (request.session_id != null && llmResponse.reply != null) {
+                        repository.saveMessage(
+                            sessionId = request.session_id,
+                            role = "assistant",
+                            content = llmResponse.reply,
+                            inputTokens = llmResponse.usage?.input_tokens,
+                            outputTokens = llmResponse.usage?.output_tokens
+                        )
+                    }
+
+                    logger.info("✅ LLM response completed and sent via WebSocket")
+                } catch (e: Exception) {
+                    logger.error("Ошибка в асинхронной LLM генерации: ${e.message}", e)
+                }
+            }
+
+        } catch (e: Exception) {
+            logger.error("Ошибка в /api/voice/chat: ${e.message}", e)
+            call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Ошибка сервера: ${e.message}"))
+        }
+    }
+}
+
+private fun readFirstBytes(file: File, maxLen: Int): ByteArray {
+    if (maxLen <= 0) return ByteArray(0)
+    return file.inputStream().use { input ->
+        val buf = ByteArray(maxLen)
+        val read = input.read(buf)
+        if (read <= 0) ByteArray(0) else buf.copyOf(read)
+    }
+}
+
+private fun toHex(bytes: ByteArray): String =
+    bytes.joinToString(" ") { b -> "%02X".format(b.toInt() and 0xFF) }
+
+/**
+ * Грубое определение контейнера/формата по magic-bytes (только для логов/диагностики).
+ */
+private fun detectAudioContainer(header: ByteArray): String {
+    fun hasPrefix(vararg b: Int): Boolean {
+        if (header.size < b.size) return false
+        for (i in b.indices) {
+            if ((header[i].toInt() and 0xFF) != b[i]) return false
+        }
+        return true
+    }
+
+    val isWav = header.size >= 12 &&
+        header[0] == 'R'.code.toByte() &&
+        header[1] == 'I'.code.toByte() &&
+        header[2] == 'F'.code.toByte() &&
+        header[3] == 'F'.code.toByte() &&
+        header[8] == 'W'.code.toByte() &&
+        header[9] == 'A'.code.toByte() &&
+        header[10] == 'V'.code.toByte() &&
+        header[11] == 'E'.code.toByte()
+
+    if (hasPrefix(0x1A, 0x45, 0xDF, 0xA3)) return "webm/ebml"
+    if (isWav) return "wav/riff"
+    if (hasPrefix(0x4F, 0x67, 0x67, 0x53)) return "ogg/oggs"
+    if (hasPrefix(0x49, 0x44, 0x33)) return "mp3/id3"
+
+    // MP4/M4A: [size:4 bytes][ftyp]
+    val isFtyp = header.size >= 8 &&
+        header[4] == 'f'.code.toByte() &&
+        header[5] == 't'.code.toByte() &&
+        header[6] == 'y'.code.toByte() &&
+        header[7] == 'p'.code.toByte()
+    if (isFtyp) return "mp4/m4a(ftyp)"
+
+    // MP3 frame sync
+    if (header.size >= 2) {
+        val b0 = header[0].toInt() and 0xFF
+        val b1 = header[1].toInt() and 0xFF
+        if (b0 == 0xFF && (b1 and 0xE0) == 0xE0) return "mp3(frame)"
+    }
+
+    return "unknown"
 }

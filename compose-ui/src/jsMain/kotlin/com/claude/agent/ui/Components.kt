@@ -301,7 +301,10 @@ fun InputPanel(
     inputText: String,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
-    enabled: Boolean
+    enabled: Boolean,
+    isRecording: Boolean = false,
+    onVoiceRecordStart: () -> Unit = {},
+    onVoiceRecordStop: () -> Unit = {}
 ) {
     Div({ classes("input-group") }) {
         TextArea(inputText) {
@@ -320,9 +323,32 @@ fun InputPanel(
                     }
                 }
             }
+            if (!enabled || isRecording) {
+                disabled()
+            }
+        }
+
+        // Кнопка микрофона
+        Button({
+            classes("mic-button")
+            if (isRecording) {
+                classes("recording")
+            }
+            onClick {
+                console.log("🔘 Mic button clicked, isRecording = $isRecording")
+                if (isRecording) {
+                    console.log("⏹️ Calling onVoiceRecordStop")
+                    onVoiceRecordStop()
+                } else {
+                    console.log("🎤 Calling onVoiceRecordStart")
+                    onVoiceRecordStart()
+                }
+            }
             if (!enabled) {
                 disabled()
             }
+        }) {
+            Text(if (isRecording) "⏹️" else "🎤")
         }
 
         Button({
@@ -332,7 +358,7 @@ fun InputPanel(
                     onSend()
                 }
             }
-            if (!enabled || inputText.isBlank()) {
+            if (!enabled || inputText.isBlank() || isRecording) {
                 disabled()
             }
         }) {

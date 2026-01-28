@@ -53,7 +53,7 @@ object AppConfig {
      * Получить значение переменной окружения.
      * Приоритет: системные переменные > .env файл
      */
-    private fun getEnv(key: String): String? {
+    fun getEnv(key: String): String? {
         return System.getenv(key) ?: dotenv?.get(key)
     }
 

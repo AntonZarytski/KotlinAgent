@@ -83,6 +83,110 @@ object Utils {
         }
     }
 
+    /**
+     * Проверяет доступность MediaRecorder API
+     */
+    fun isMediaRecorderSupported(): Boolean {
+        return try {
+            js("'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices") == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Запрашивает доступ к микрофону и возвращает MediaStream
+     */
+    suspend fun requestMicrophoneAccess(): dynamic? {
+        return try {
+            if (!isMediaRecorderSupported()) {
+                console.warn("MediaRecorder API not supported")
+                return null
+            }
+
+            if (!window.asDynamic().isSecureContext && window.location.protocol != "file:") {
+                console.warn("MediaRecorder requires HTTPS or localhost")
+                return null
+            }
+
+            val stream = Promise<dynamic> { resolve, reject ->
+                js("""
+                    navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            channelCount: 1,
+                            sampleRate: 16000,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        }
+                    }).then(resolve).catch(reject)
+                """)
+            }.await()
+
+            console.log("Microphone access granted")
+            stream
+        } catch (e: Exception) {
+            console.error("Failed to get microphone access: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Создает MediaRecorder и начинает запись
+     * Возвращает объект с методами stop() и getBlob()
+     */
+    fun createMediaRecorder(stream: dynamic, onDataAvailable: (dynamic) -> Unit): dynamic? {
+        return try {
+            val chunks = js("[]")
+            val recorder = js("new MediaRecorder(stream, { mimeType: 'audio/webm' })")
+
+            recorder.ondataavailable = { event: dynamic ->
+                if (event.data.size > 0) {
+                    chunks.push(event.data)
+                    onDataAvailable(event.data)
+                }
+            }
+
+            js("""({
+                recorder: recorder,
+                chunks: chunks,
+                start: function() {
+                    // Очищаем chunks перед началом новой записи
+                    this.chunks.length = 0;
+                    this.recorder.start(1000);
+                },
+                stop: function() {
+                    var self = this;
+                    return new Promise(function(resolve) {
+                        self.recorder.onstop = function() {
+                            var blob = new Blob(self.chunks, { type: 'audio/webm' });
+                            console.log('🎤 Blob created from ' + self.chunks.length + ' chunks, total size: ' + blob.size);
+                            resolve(blob);
+                        };
+                        self.recorder.stop();
+                    });
+                },
+                getState: function() {
+                    return this.recorder.state;
+                }
+            })""")
+        } catch (e: Exception) {
+            console.error("Failed to create MediaRecorder: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Останавливает все треки в MediaStream
+     */
+    fun stopMediaStream(stream: dynamic) {
+        try {
+            js("stream.getTracks().forEach(function(track) { track.stop(); })")
+            console.log("Media stream stopped")
+        } catch (e: Exception) {
+            console.error("Failed to stop media stream: ${e.message}")
+        }
+    }
+
     fun escapeHtml(text: String): String {
         return text
             .replace("&", "&amp;")

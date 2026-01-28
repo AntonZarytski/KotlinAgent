@@ -16,6 +16,14 @@ PORT=8000
 HOST=0.0.0.0
 DATABASE_PATH=conversations.db
 STATIC_FOLDER=ui
+
+# Speech Recognition (опционально)
+# Скачайте модель с https://alphacephei.com/vosk/models
+# Рекомендуемые модели:
+# - Русский: vosk-model-ru-0.42 (1.5 GB)
+# - Английский: vosk-model-en-us-0.22 (1.8 GB)
+# - Малая русская: vosk-model-small-ru-0.22 (45 MB)
+SPEECH_MODEL_PATH=/path/to/vosk-model-ru-0.42
 ```
 
 ### 2. Персонализация агента (опционально)
