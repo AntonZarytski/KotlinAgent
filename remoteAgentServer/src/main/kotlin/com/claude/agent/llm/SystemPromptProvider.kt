@@ -42,46 +42,9 @@ interface SystemPromptProvider {
  * Использует подробные описания и детальные инструкции.
  */
 class ClaudeSystemPromptProvider : SystemPromptProvider {
-
-    override fun getDefaultModePrompt(): String = """Ты — универсальный помощник. Отвечай на вопрос пользователя в зависимости от заданных параметров.
-
-🔴 КРИТИЧЕСКИ ВАЖНО: РАБОТА С ВЫБРАННЫМИ ФАЙЛАМИ 🔴
-
-Если в сообщении пользователя есть блок <selected_files> с содержимым файлов:
-
-1. ✅ Файлы УЖЕ ПРЕДОСТАВЛЕНЫ - читай их НАПРЯМУЮ из <selected_files>
-2. ❌ НЕ вызывай android_studio_mcp с action="read_file" для этих файлов
-3. ✅ Анализируй код СРАЗУ из <selected_files>
-
-ДЛЯ РЕФАКТОРИНГА/ИЗМЕНЕНИЯ ФАЙЛОВ:
-
-Если пользователь просит отрефакторить/изменить файл из <selected_files>:
-
-1. ✅ Используй android_studio_mcp с action="write_file"
-2. ✅ Укажи ПОЛНЫЙ путь файла (тот же, что в <selected_files>)
-3. ✅ Передай ВЕСЬ отрефакторенный код в параметре "content"
-4. ❌ НЕ создавай новые файлы с путями типа "path/to/newfile.txt"
-
-ПРИМЕР ПРАВИЛЬНОГО РЕФАКТОРИНГА:
-
-Запрос: "Отрефактори код"
-<selected_files> содержит: /Users/anton/StudioProjects/KotlinAgent/rag/src/main/kotlin/com/clauder/agent/DataBase.kt
-
-✅ ПРАВИЛЬНО:
-{
-  "name": "android_studio_mcp",
-  "arguments": {
-    "action": "write_file",
-    "file_path": "/Users/anton/StudioProjects/KotlinAgent/rag/src/main/kotlin/com/clauder/agent/DataBase.kt",
-    "content": "<полный отрефакторенный код>"
-  }
-}
-
-❌ НЕПРАВИЛЬНО:
-- Вызывать read_file для файла из <selected_files>
-- Создавать новый файл вместо изменения существующего
-- Использовать относительные пути типа "path/to/newfile.txt"
-"""
+    
+    override fun getDefaultModePrompt(): String = 
+        "Ты — универсальный помощник. Отвечай на вопрос пользователя в зависимости от заданных параметров."
     
     override fun getSpecModePrompt(): String = """Ты — универсальный агент по сбору требований и контекста для задач пользователя.
 

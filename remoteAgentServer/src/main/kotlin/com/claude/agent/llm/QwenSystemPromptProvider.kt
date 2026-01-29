@@ -38,29 +38,6 @@ class QwenSystemPromptProvider : SystemPromptProvider {
    1. ...
    2. ...
 
-ДЛЯ РЕФАКТОРИНГА/ИЗМЕНЕНИЯ ФАЙЛОВ:
-
-Если пользователь просит отрефакторить/изменить файл из <selected_files>:
-
-1. ✅ Используй android_studio_mcp с action="write_file"
-2. ✅ Укажи ПОЛНЫЙ путь файла (СКОПИРУЙ из <selected_files>)
-3. ✅ Передай ВЕСЬ отрефакторенный код в параметре "content"
-4. ❌ НЕ используй плейсхолдеры типа "<path_to_file>" или "<new_content>"
-5. ❌ НЕ создавай новые файлы
-
-ПРИМЕР:
-Запрос: "Отрефактори код"
-<selected_files>: /Users/anton/StudioProjects/KotlinAgent/rag/src/main/kotlin/com/clauder/agent/DataBase.kt
-
-✅ ПРАВИЛЬНО:
-{"name": "android_studio_mcp", "arguments": {"action": "write_file", "file_path": "/Users/anton/StudioProjects/KotlinAgent/rag/src/main/kotlin/com/clauder/agent/DataBase.kt", "content": "package com.clauder.agent\n\nclass DataBase {\n  // весь отрефакторенный код\n}"}}
-
-❌ НЕПРАВИЛЬНО (плейсхолдеры):
-{"name": "android_studio_mcp", "arguments": {"action": "write_file", "file_path": "<path_to_file>", "content": "<new_content>"}}
-
-❌ НЕПРАВИЛЬНО (новый файл):
-{"name": "android_studio_mcp", "arguments": {"action": "write_file", "file_path": "path/to/newfile.txt", "content": "..."}}
-
 ПРАВИЛА ВЫБОРА ИНСТРУМЕНТА:
 
 1. ВСЕГДА используй android_studio_mcp для задач с файлами и Android

@@ -119,14 +119,8 @@ class ClaudeClient(
             }
 
             // Получаем контекст выбранных файлов
-            logger.info("📎 Selected files count: ${selectedFiles.size}")
-            if (selectedFiles.isNotEmpty()) {
-                logger.info("📎 Selected files: ${selectedFiles.joinToString(", ")}")
-            }
             val fileContext = if (selectedFiles.isNotEmpty()) {
-                val context = FileContextRetriever.retrieveFileContext(selectedFiles, sessionId, mcpTools)
-                logger.info("📎 File context retrieved: ${if (context != null) "${context.length} chars" else "null"}")
-                context
+                FileContextRetriever.retrieveFileContext(selectedFiles, sessionId, mcpTools)
             } else {
                 null
             }
