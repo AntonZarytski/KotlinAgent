@@ -290,8 +290,10 @@ fun LoadingIndicator() {
             Text("🤖")
         }
 
-        Div({ classes("message", "assistant") }) {
-            Text("Модель думает...")
+        Div({ classes("message-container") }) {
+            Div({ classes("message", "assistant") }) {
+                Text("Модель думает...")
+            }
         }
     }
 }

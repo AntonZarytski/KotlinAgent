@@ -64,7 +64,7 @@ object PromptCachingConfig {
 
 // === Настройки фильтрации tools ===
 object ToolsFilteringConfig {
-    const val ENABLED = true                  // Включить динамическую фильтрацию
+    const val ENABLED = false                 // Отключить динамическую фильтрацию (для лучшего кэширования)
     const val MAX_TOOLS_PER_REQUEST = 5       // Максимум tools в одном запросе
     const val USE_KEYWORD_MATCHING = true     // Использовать поиск по ключевым словам
 }

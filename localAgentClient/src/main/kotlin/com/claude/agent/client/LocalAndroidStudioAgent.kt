@@ -16,7 +16,7 @@ import kotlin.time.Duration.Companion.seconds
 class LocalAndroidStudioAgent(
     private val vpsUrl: String,
     private val agentId: String = "android-studio-${System.getenv("COMPUTERNAME")}",
-    private val initialAndroidProjectPath: String? = "/Users/anton/StudioProjects"
+    private val initialAndroidProjectPath: String? = "/Users/anton/StudioProjects/KotlinAgent"
 //    private val initialAndroidProjectPath: String? = "/Users/aliaksandramolchan/StudioProjects"
 ) {
     private val logger = LoggerFactory.getLogger(LocalAndroidStudioAgent::class.java)
@@ -55,13 +55,19 @@ class LocalAndroidStudioAgent(
      * Also handles the case where an absolute path is passed but should be used directly.
      */
     private fun resolveFilePath(filePath: String, projectPath: String): File {
-        return if (filePath.startsWith("/") || filePath.matches(Regex("^[A-Za-z]:\\\\.+"))) {
+        logger.debug("🔍 resolveFilePath: filePath='$filePath', projectPath='$projectPath'")
+        val result = if (filePath.startsWith("/") || filePath.matches(Regex("^[A-Za-z]:\\\\.+"))) {
             // Already an absolute path - use it directly
+            logger.debug("✅ Using absolute path directly: $filePath")
             File(filePath)
         } else {
             // Relative path - resolve against project path
-            File(projectPath, filePath)
+            val resolved = File(projectPath, filePath)
+            logger.debug("🔗 Resolved relative path: ${resolved.absolutePath}")
+            resolved
         }
+        logger.debug("📍 Final resolved path: ${result.absolutePath}")
+        return result
     }
 
     @Volatile
@@ -326,6 +332,7 @@ class LocalAndroidStudioAgent(
                             add("read_file_lines")
                             add("find_files")
                             add("save_log")
+                            add("write_file")
                         }
                     }
                     putJsonObject("action_description") {
@@ -414,6 +421,16 @@ class LocalAndroidStudioAgent(
                     putJsonObject("log_name") {
                         put("type", "string")
                         put("description", "Name for the log file")
+                    }
+                    // Parameters for write_file action
+                    putJsonObject("content") {
+                        put("type", "string")
+                        put("description", "For write_file: new content to write to the file")
+                    }
+                    putJsonObject("create_backup") {
+                        put("type", "boolean")
+                        put("description", "For write_file: create backup of original file before writing (default: true)")
+                        put("default", true)
                     }
                 }
                 putJsonArray("required") { add("action") }
@@ -521,6 +538,10 @@ class LocalAndroidStudioAgent(
             "read_app_log" -> {
                 logger.info("→ [EXEC_CMD] Calling readAppLog")
                 readAppLog(arguments)
+            }
+            "write_file" -> {
+                logger.info("→ [EXEC_CMD] Calling writeFile")
+                writeFile(arguments)
             }
             else -> {
                 logger.error("❌ [EXEC_CMD] Unknown action: $action")
@@ -1289,7 +1310,7 @@ class LocalAndroidStudioAgent(
         }
 
         try {
-            val maxDepth = arguments["max_depth"]?.jsonPrimitive?.intOrNull ?: 3
+            val maxDepth = arguments["max_depth"]?.jsonPrimitive?.intOrNull ?: 20
             val rootDir = File(androidProjectPath)
 
             if (!rootDir.exists() || !rootDir.isDirectory) {
@@ -1297,12 +1318,17 @@ class LocalAndroidStudioAgent(
             }
 
             logger.info("📂 Building file tree for: ${rootDir.absolutePath} (max depth: $maxDepth)")
+            logger.debug("🔍 androidProjectPath = $androidProjectPath")
 
             fun buildTree(dir: File, currentDepth: Int): JsonObject? {
                 if (currentDepth > maxDepth) return null
 
                 // Skip common directories that should be ignored
-                val ignoredDirs = setOf(".git", ".gradle", "build", ".idea", "node_modules", ".kotlin")
+                val ignoredDirs = setOf(
+                    ".git", ".gradle", "build", ".idea", "node_modules", ".kotlin",
+                    "out", "target", "dist", ".cache", ".vscode", ".fleet",
+                    "generated", "intermediates", "tmp", "temp"
+                )
                 if (dir.name in ignoredDirs) return null
 
                 val files = dir.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name })) ?: emptyList()
@@ -1310,7 +1336,9 @@ class LocalAndroidStudioAgent(
                 return buildJsonObject {
                     put("name", dir.name)
                     // Используем абсолютный путь вместо относительного
-                    put("path", dir.absolutePath)
+                    val dirPath = dir.absolutePath
+                    logger.trace("📁 Directory path: $dirPath")
+                    put("path", dirPath)
                     put("type", "directory")
 
                     putJsonArray("children") {
@@ -1324,7 +1352,9 @@ class LocalAndroidStudioAgent(
                                 addJsonObject {
                                     put("name", file.name)
                                     // Используем абсолютный путь для файлов
-                                    put("path", file.absolutePath)
+                                    val filePath = file.absolutePath
+                                    logger.trace("📄 File path: $filePath")
+                                    put("path", filePath)
                                     put("type", "file")
                                 }
                             }
@@ -1650,6 +1680,115 @@ class LocalAndroidStudioAgent(
             e.printStackTrace()
             errorJson("Read app log failed: ${e.message}")
         }
+    }
+
+    /**
+     * Записывает содержимое в файл с созданием бэкапа и генерацией diff
+     */
+    private suspend fun writeFile(arguments: JsonObject): String = withContext(Dispatchers.IO) {
+        logger.info("✍️ [WRITE_FILE] writeFile called")
+        logger.debug("   Arguments: $arguments")
+
+        if (androidProjectPath == null) {
+            logger.error("❌ [WRITE_FILE] Android project path is not configured")
+            return@withContext errorJson("Android project path not configured")
+        }
+
+        try {
+            val filePath = arguments["file_path"]?.jsonPrimitive?.content
+                ?: return@withContext errorJson("Missing file_path parameter")
+            val newContent = arguments["content"]?.jsonPrimitive?.content
+                ?: return@withContext errorJson("Missing content parameter")
+            val createBackup = arguments["create_backup"]?.jsonPrimitive?.booleanOrNull ?: true
+
+            val targetFile = resolveFilePath(filePath, androidProjectPath!!)
+            logger.debug("✍️ [WRITE_FILE] Writing to file: ${targetFile.absolutePath}")
+
+            // Проверяем существование файла
+            val fileExists = targetFile.exists()
+            val oldContent = if (fileExists) targetFile.readText() else ""
+
+            // Создаем бэкап если файл существует и включен флаг
+            var backupPath: String? = null
+            if (fileExists && createBackup) {
+                val backupFile = File("${targetFile.absolutePath}.backup")
+                targetFile.copyTo(backupFile, overwrite = true)
+                backupPath = backupFile.absolutePath
+                logger.info("📦 [WRITE_FILE] Backup created: $backupPath")
+            }
+
+            // Записываем новое содержимое
+            targetFile.writeText(newContent)
+            logger.info("✅ [WRITE_FILE] File written successfully: ${targetFile.absolutePath}")
+
+            // Генерируем diff для отображения в чате
+            val diff = if (fileExists) {
+                generateDiff(oldContent, newContent, filePath)
+            } else {
+                "File created: $filePath\n\nContent:\n$newContent"
+            }
+
+            buildJsonObject {
+                put("status", "success")
+                put("file_path", filePath)
+                put("absolute_path", targetFile.absolutePath)
+                put("backup_path", backupPath)
+                put("diff", diff)
+                put("old_content", oldContent)
+                put("new_content", newContent)
+                put("file_existed", fileExists)
+                put("size", targetFile.length())
+            }.toString()
+
+        } catch (e: Exception) {
+            logger.error("❌ [WRITE_FILE] Exception during writeFile")
+            e.printStackTrace()
+            errorJson("Write file failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Генерирует простой diff между старым и новым содержимым
+     */
+    private fun generateDiff(oldContent: String, newContent: String, filePath: String): String {
+        val oldLines = oldContent.lines()
+        val newLines = newContent.lines()
+
+        val diff = StringBuilder()
+        diff.append("Changes in $filePath:\n\n")
+
+        // Простой построчный diff
+        val maxLines = maxOf(oldLines.size, newLines.size)
+        var changesCount = 0
+
+        for (i in 0 until maxLines) {
+            val oldLine = oldLines.getOrNull(i)
+            val newLine = newLines.getOrNull(i)
+
+            when {
+                oldLine == null && newLine != null -> {
+                    diff.append("+ ${i + 1}: $newLine\n")
+                    changesCount++
+                }
+                oldLine != null && newLine == null -> {
+                    diff.append("- ${i + 1}: $oldLine\n")
+                    changesCount++
+                }
+                oldLine != newLine -> {
+                    diff.append("- ${i + 1}: $oldLine\n")
+                    diff.append("+ ${i + 1}: $newLine\n")
+                    changesCount++
+                }
+            }
+        }
+
+        if (changesCount == 0) {
+            diff.append("No changes detected")
+        } else {
+            diff.insert(0, "Total changes: $changesCount lines\n\n")
+        }
+
+        return diff.toString()
     }
 
     internal fun findAndroidHome(): String? {

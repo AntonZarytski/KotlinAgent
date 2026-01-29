@@ -142,7 +142,7 @@ class QwenLlmProvider(
 
             // Получаем контекст выбранных файлов
             val fileContext = if (selectedFiles.isNotEmpty()) {
-                retrieveFileContext(selectedFiles, sessionId)
+                FileContextRetriever.retrieveFileContext(selectedFiles, sessionId, mcpTools)
             } else null
 
             // Получаем RAG контекст
@@ -227,105 +227,7 @@ class QwenLlmProvider(
         }
     }
 
-    /**
-     * Получает контекст выбранных файлов
-     */
-    private suspend fun retrieveFileContext(
-        selectedFiles: List<String>,
-        sessionId: String?
-    ): String? {
-        if (selectedFiles.isEmpty()) {
-            return null
-        }
 
-        return try {
-            logger.info("📂 Processing ${selectedFiles.size} selected files...")
-
-            val fileContents = mutableListOf<String>()
-
-            // Расширения бинарных файлов, для которых не нужно читать содержимое
-            val binaryExtensions = setOf(
-                "aab", "apk", "jar", "aar", "so", "a", "o",
-                "zip", "tar", "gz", "7z", "rar",
-                "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico",
-                "mp3", "mp4", "avi", "mov", "wav", "flac",
-                "pdf", "doc", "docx", "xls", "xlsx",
-                "class", "dex", "bin", "exe", "dll"
-            )
-
-            for (filePath in selectedFiles) {
-                try {
-                    val fileName = filePath.substringAfterLast('/')
-                    val extension = fileName.substringAfterLast('.', "").lowercase()
-                    val hasExtension = fileName.contains('.')
-                    val isBinary = extension in binaryExtensions
-
-                    // Если нет расширения - скорее всего это папка
-                    if (!hasExtension) {
-                        fileContents.add("""
-                            |Directory: $filePath
-                            |Type: Directory
-                            |Note: This is a directory path. The full path is available for use with tools.
-                        """.trimMargin())
-                        logger.info("📁 Directory: $filePath")
-                    } else if (isBinary) {
-                        // Для бинарных файлов просто указываем путь
-                        fileContents.add("""
-                            |File: $filePath
-                            |Type: Binary file (.$extension)
-                            |Note: This is a binary file. The full path is available for use with tools.
-                        """.trimMargin())
-                        logger.info("📦 Binary file: $filePath (.$extension)")
-                    } else {
-                        // Для текстовых файлов читаем содержимое
-                        val result = mcpTools.callLocalTool(
-                            toolName = "android_studio",
-                            arguments = buildJsonObject {
-                                put("action", "read_file")
-                                put("file_path", filePath)
-                            },
-                            clientIp = null,
-                            userLocation = null,
-                            sessionId = sessionId
-                        )
-
-                        val resultJson = Json.parseToJsonElement(result).jsonObject
-                        val content = resultJson["content"]?.jsonPrimitive?.content
-
-                        if (content != null) {
-                            fileContents.add("""
-                                |File: $filePath
-                                |```
-                                |$content
-                                |```
-                            """.trimMargin())
-                            logger.info("✅ Read text file: $filePath (${content.length} chars)")
-                        } else {
-                            logger.warn("⚠️ Failed to read file: $filePath")
-                        }
-                    }
-                } catch (e: Exception) {
-                    logger.error("❌ Error processing file $filePath: ${e.message}")
-                }
-            }
-
-            if (fileContents.isEmpty()) {
-                return null
-            }
-
-            """
-            |<selected_files>
-            |The user has selected the following files for context:
-            |
-            |${fileContents.joinToString("\n\n")}
-            |</selected_files>
-            """.trimMargin()
-
-        } catch (e: Exception) {
-            logger.error("Failed to retrieve file context: ${e.message}", e)
-            null
-        }
-    }
 
     /**
      * Получает RAG контекст для запроса
@@ -764,7 +666,7 @@ class QwenLlmProvider(
                         val messageData = buildJsonObject {
                             put("role", "assistant")
                             put("content", assistantMessage.content)
-                            put("timestamp", System.currentTimeMillis())
+                            put("timestamp", java.time.Instant.now().toString())  // ISO 8601 формат
                         }
 
                         webSocketService.broadcastToSession(
@@ -892,7 +794,7 @@ class QwenLlmProvider(
         val requiredParams = when (action) {
             "start_emulator" -> listOf("avd_name")
             "read_file" -> listOf("file_path")
-            "browse_files" -> listOf("directory_path")
+            "browse_files" -> emptyList() // directory_path может быть пустым (корень проекта)
             "gradle_build" -> emptyList() // build_variant опционален
             "install_apk" -> listOf("apk_path")
             "run_app" -> listOf("package_name")

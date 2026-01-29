@@ -210,18 +210,46 @@ object Utils {
         // - Обрабатывает случаи когда ``` идут сразу после текста
         html = html.replace(Regex("```(\\w*)\n([\\s\\S]*?)```", RegexOption.MULTILINE)) { match ->
             val lang = match.groupValues[1].ifEmpty { "code" }
-            val code = escapeHtml(match.groupValues[2].trimEnd())
+            val code = match.groupValues[2].trimEnd()
             val placeholder = "\n___CODE_BLOCK_${codeBlockCounter++}___\n"
 
-            codeBlocks[placeholder] = "<div class=\"code-block-wrapper\">" +
-                "<div class=\"code-block-header\">" +
-                    "<span class=\"code-language\">$lang</span>" +
-                    "<button class=\"copy-btn\" onclick=\"copyCode(this)\">" +
-                        "<span>Копировать</span>" +
-                    "</button>" +
-                "</div>" +
-                "<pre><code class=\"language-$lang\">$code</code></pre>" +
-            "</div>"
+            // Проверяем, является ли это diff-блоком
+            val isDiff = lang == "diff" || code.lines().any { it.startsWith("+ ") || it.startsWith("- ") }
+
+            if (isDiff) {
+                // Обрабатываем diff с подсветкой
+                val diffHtml = code.lines().joinToString("\n") { line ->
+                    when {
+                        line.startsWith("+ ") -> "<span style=\"color: #22c55e; background: rgba(34, 197, 94, 0.1);\">$line</span>"
+                        line.startsWith("- ") -> "<span style=\"color: #ef4444; background: rgba(239, 68, 68, 0.1);\">$line</span>"
+                        line.startsWith("Changes in ") || line.startsWith("Total changes:") ->
+                            "<span style=\"color: #3b82f6; font-weight: 600;\">$line</span>"
+                        else -> escapeHtml(line)
+                    }
+                }
+
+                codeBlocks[placeholder] = "<div class=\"code-block-wrapper diff-block\">" +
+                    "<div class=\"code-block-header\" style=\"background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);\">" +
+                        "<span class=\"code-language\">📝 Изменения файла</span>" +
+                        "<button class=\"copy-btn\" onclick=\"copyCode(this)\">" +
+                            "<span>Копировать</span>" +
+                        "</button>" +
+                    "</div>" +
+                    "<pre><code class=\"language-diff\">$diffHtml</code></pre>" +
+                "</div>"
+            } else {
+                // Обычный блок кода
+                val escapedCode = escapeHtml(code)
+                codeBlocks[placeholder] = "<div class=\"code-block-wrapper\">" +
+                    "<div class=\"code-block-header\">" +
+                        "<span class=\"code-language\">$lang</span>" +
+                        "<button class=\"copy-btn\" onclick=\"copyCode(this)\">" +
+                            "<span>Копировать</span>" +
+                        "</button>" +
+                    "</div>" +
+                    "<pre><code class=\"language-$lang\">$escapedCode</code></pre>" +
+                "</div>"
+            }
 
             placeholder
         }

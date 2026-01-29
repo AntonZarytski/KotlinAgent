@@ -119,8 +119,14 @@ class ClaudeClient(
             }
 
             // Получаем контекст выбранных файлов
+            logger.info("📎 Selected files count: ${selectedFiles.size}")
+            if (selectedFiles.isNotEmpty()) {
+                logger.info("📎 Selected files: ${selectedFiles.joinToString(", ")}")
+            }
             val fileContext = if (selectedFiles.isNotEmpty()) {
-                retrieveFileContext(selectedFiles, sessionId)
+                val context = FileContextRetriever.retrieveFileContext(selectedFiles, sessionId, mcpTools)
+                logger.info("📎 File context retrieved: ${if (context != null) "${context.length} chars" else "null"}")
+                context
             } else {
                 null
             }
@@ -243,6 +249,29 @@ class ClaudeClient(
                     usage = totalUsage,
                     cachedTokens = cacheReadTokens
                 )
+            }
+
+            // 🔥 НОВОЕ: Отправляем финальное сообщение через WebSocket
+            if (sessionId != null && finalReply != null) {
+                try {
+                    val messageData = buildJsonObject {
+                        put("role", "assistant")
+                        put("content", finalReply)
+                        put("timestamp", java.time.Instant.now().toString())  // ISO 8601 формат
+                    }
+
+                    webSocketService.broadcastToSession(
+                        sessionId = sessionId,
+                        message = WebSocketMessage(
+                            type = "new_message",  // Финальное сообщение!
+                            sessionId = sessionId,
+                            data = Json.encodeToString(messageData)
+                        )
+                    )
+                    logger.info("📡 Финальный ответ Claude отправлен через WebSocket")
+                } catch (e: Exception) {
+                    logger.warn("Не удалось отправить финальный ответ через WebSocket: ${e.message}")
+                }
             }
 
             return ClaudeResponse(
@@ -683,8 +712,10 @@ class ClaudeClient(
                 )
 
                 // Добавляем cache_control для последнего инструмента (если включено кэширование)
+                // По документации Anthropic, cache_control на последнем элементе кэширует весь блок
                 if (PromptCachingConfig.ENABLED && PromptCachingConfig.CACHE_TOOLS && index == filtered.size - 1) {
                     toolDef["cache_control"] = JsonObject(mapOf("type" to JsonPrimitive("ephemeral")))
+                    logger.debug("💾 Caching tools block (${filtered.size} tools)")
                 }
 
                 add(JsonObject(toolDef))
@@ -741,110 +772,6 @@ class ClaudeClient(
     }
 
     fun isApiKeyConfigured(): Boolean = apiKey.isNotBlank()
-
-    /**
-     * Чтение выбранных файлов через android_studio MCP
-     *
-     * @param selectedFiles Список путей к файлам (относительно корня проекта)
-     * @param sessionId ID сессии для получения пути к проекту
-     * @return Отформатированный контекст с содержимым файлов
-     */
-    private suspend fun retrieveFileContext(
-        selectedFiles: List<String>,
-        sessionId: String?
-    ): String? {
-        if (selectedFiles.isEmpty()) {
-            return null
-        }
-
-        return try {
-            logger.info("📂 Processing ${selectedFiles.size} selected files...")
-
-            val fileContents = mutableListOf<String>()
-
-            // Расширения бинарных файлов, для которых не нужно читать содержимое
-            val binaryExtensions = setOf(
-                "aab", "apk", "jar", "aar", "so", "a", "o",
-                "zip", "tar", "gz", "7z", "rar",
-                "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico",
-                "mp3", "mp4", "avi", "mov", "wav", "flac",
-                "pdf", "doc", "docx", "xls", "xlsx",
-                "class", "dex", "bin", "exe", "dll"
-            )
-
-            for (filePath in selectedFiles) {
-                try {
-                    val fileName = filePath.substringAfterLast('/')
-                    val extension = fileName.substringAfterLast('.', "").lowercase()
-                    val hasExtension = fileName.contains('.')
-                    val isBinary = extension in binaryExtensions
-
-                    // Если нет расширения - скорее всего это папка
-                    if (!hasExtension) {
-                        fileContents.add("""
-                            |Directory: $filePath
-                            |Type: Directory
-                            |Note: This is a directory path. The full path is available for use with tools.
-                        """.trimMargin())
-                        logger.info("📁 Directory: $filePath")
-                    } else if (isBinary) {
-                        // Для бинарных файлов просто указываем путь
-                        fileContents.add("""
-                            |File: $filePath
-                            |Type: Binary file (.$extension)
-                            |Note: This is a binary file. The full path is available for use with tools.
-                        """.trimMargin())
-                        logger.info("📦 Binary file: $filePath (.$extension)")
-                    } else {
-                        // Для текстовых файлов читаем содержимое
-                        val result = mcpTools.callLocalTool(
-                            toolName = "android_studio",
-                            arguments = buildJsonObject {
-                                put("action", "read_file")
-                                put("file_path", filePath)
-                            },
-                            clientIp = null,
-                            userLocation = null,
-                            sessionId = sessionId
-                        )
-
-                        val resultJson = Json.parseToJsonElement(result).jsonObject
-                        val content = resultJson["content"]?.jsonPrimitive?.content
-
-                        if (content != null) {
-                            fileContents.add("""
-                                |File: $filePath
-                                |```
-                                |$content
-                                |```
-                            """.trimMargin())
-                            logger.info("✅ Read text file: $filePath (${content.length} chars)")
-                        } else {
-                            logger.warn("⚠️ Failed to read file: $filePath")
-                        }
-                    }
-                } catch (e: Exception) {
-                    logger.error("❌ Error processing file $filePath: ${e.message}")
-                }
-            }
-
-            if (fileContents.isEmpty()) {
-                return null
-            }
-
-            """
-            |<selected_files>
-            |The user has selected the following files for context:
-            |
-            |${fileContents.joinToString("\n\n")}
-            |</selected_files>
-            """.trimMargin()
-
-        } catch (e: Exception) {
-            logger.error("Failed to retrieve file context: ${e.message}", e)
-            null
-        }
-    }
 
     /**
      * Получение релевантного контекста из RAG базы данных

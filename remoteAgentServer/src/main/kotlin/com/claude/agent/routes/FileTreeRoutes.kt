@@ -59,7 +59,7 @@ fun Route.fileTreeRoutes() {
             // Вызываем android_studio_mcp get_file_tree
             val arguments = buildJsonObject {
                 put("action", "get_file_tree")
-                put("max_depth", 3)  // Ограничиваем глубину дерева
+                put("max_depth", 20)  // Увеличена глубина для полного отображения структуры проекта
             }
 
             val result = LocalAgentManager.executeOnLocalAgent(

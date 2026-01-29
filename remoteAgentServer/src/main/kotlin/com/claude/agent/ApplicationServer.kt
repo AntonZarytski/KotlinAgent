@@ -381,11 +381,11 @@ fun Application.module() {
     val localMcpProvider = LocalMcpProvider(
         listOf(
             actionPlannerMcp,
-            WeatherMcp(httpClient, geolocationService),
-            reminderMcp,
-            googlePlayPublisherMcp,
+//            WeatherMcp(httpClient, geolocationService),
+//            reminderMcp,
+//            googlePlayPublisherMcp,
             AndroidStudioLocalMcp(),
-            GitRepositoryMcp(),
+//            GitRepositoryMcp(),
             logAnalyzerMcp
             )
     )

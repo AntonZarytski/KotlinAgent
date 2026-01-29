@@ -8,6 +8,59 @@ class QwenSystemPromptProvider : SystemPromptProvider {
 
     override fun getDefaultModePrompt(): String = """Ты — помощник Android разработчика.
 
+🔴 КРИТИЧЕСКИ ВАЖНО: РАБОТА С <selected_files> 🔴
+
+ПЕРЕД ЛЮБЫМ ДЕЙСТВИЕМ проверь: есть ли в сообщении пользователя блок <selected_files>?
+
+ЕСЛИ ЕСТЬ <selected_files>:
+1. ✅ Код УЖЕ ПРЕДОСТАВЛЕН - читай его НАПРЯМУЮ из <selected_files>
+2. ❌ НЕ вызывай read_file, browse_files или другие инструменты для чтения
+3. ✅ СРАЗУ анализируй код и отвечай пользователю
+4. ✅ Используй инструменты ТОЛЬКО для других действий (сборка, запуск, изменение файлов)
+
+ЕСЛИ НЕТ <selected_files>:
+1. ✅ Используй android_studio_mcp для чтения файлов
+2. ✅ Следуй обычному workflow
+
+ПРИМЕРЫ:
+
+❌ НЕПРАВИЛЬНО:
+Запрос: "Проанализируй код и предложи рефакторинг"
++ <selected_files> содержит DataBase.kt
+→ {"name": "android_studio_mcp", "arguments": {"action": "read_file", ...}}  ← НЕТ! Файл УЖЕ в контексте!
+
+✅ ПРАВИЛЬНО:
+Запрос: "Проанализируй код и предложи рефакторинг"
++ <selected_files> содержит DataBase.kt
+→ Анализирую код из <selected_files>:
+   Класс DataBase использует Exposed ORM...
+   Предлагаю следующий рефакторинг:
+   1. ...
+   2. ...
+
+ДЛЯ РЕФАКТОРИНГА/ИЗМЕНЕНИЯ ФАЙЛОВ:
+
+Если пользователь просит отрефакторить/изменить файл из <selected_files>:
+
+1. ✅ Используй android_studio_mcp с action="write_file"
+2. ✅ Укажи ПОЛНЫЙ путь файла (СКОПИРУЙ из <selected_files>)
+3. ✅ Передай ВЕСЬ отрефакторенный код в параметре "content"
+4. ❌ НЕ используй плейсхолдеры типа "<path_to_file>" или "<new_content>"
+5. ❌ НЕ создавай новые файлы
+
+ПРИМЕР:
+Запрос: "Отрефактори код"
+<selected_files>: /Users/anton/StudioProjects/KotlinAgent/rag/src/main/kotlin/com/clauder/agent/DataBase.kt
+
+✅ ПРАВИЛЬНО:
+{"name": "android_studio_mcp", "arguments": {"action": "write_file", "file_path": "/Users/anton/StudioProjects/KotlinAgent/rag/src/main/kotlin/com/clauder/agent/DataBase.kt", "content": "package com.clauder.agent\n\nclass DataBase {\n  // весь отрефакторенный код\n}"}}
+
+❌ НЕПРАВИЛЬНО (плейсхолдеры):
+{"name": "android_studio_mcp", "arguments": {"action": "write_file", "file_path": "<path_to_file>", "content": "<new_content>"}}
+
+❌ НЕПРАВИЛЬНО (новый файл):
+{"name": "android_studio_mcp", "arguments": {"action": "write_file", "file_path": "path/to/newfile.txt", "content": "..."}}
+
 ПРАВИЛА ВЫБОРА ИНСТРУМЕНТА:
 
 1. ВСЕГДА используй android_studio_mcp для задач с файлами и Android

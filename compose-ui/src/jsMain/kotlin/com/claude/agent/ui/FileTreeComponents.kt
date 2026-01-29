@@ -54,6 +54,7 @@ fun FileTreeItem(
         CheckboxInput(isSelected) {
             onInput { event ->
                 event.stopPropagation()
+                console.log("☑️ Toggling file: ${node.name}, path: ${node.path}")
                 onFileToggle(node.path)
             }
             style {

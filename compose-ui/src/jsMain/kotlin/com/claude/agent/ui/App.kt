@@ -884,12 +884,18 @@ private suspend fun sendMessage(
 
         // Send message
         // Формируем полные пути для выбранных файлов
-        val fullPathFiles = if (projectPath != null && selectedFiles.isNotEmpty()) {
-            selectedFiles.map { relativePath ->
-                "$projectPath/$relativePath"
+        // Проверяем, является ли путь уже абсолютным (начинается с /)
+        val fullPathFiles = selectedFiles.map { filePath ->
+            if (filePath.startsWith("/") || filePath.matches(Regex("^[A-Za-z]:\\\\.+"))) {
+                // Уже абсолютный путь - используем как есть
+                filePath
+            } else if (projectPath != null) {
+                // Относительный путь - добавляем projectPath
+                "$projectPath/$filePath"
+            } else {
+                // Нет projectPath - используем как есть
+                filePath
             }
-        } else {
-            selectedFiles.toList()
         }
 
         if (fullPathFiles.isNotEmpty()) {
@@ -1091,6 +1097,11 @@ private suspend fun loadFileTree(
         if (response.error != null) {
             console.error("Error loading file tree: ${response.error}")
         } else {
+            console.log("📂 File tree loaded, projectPath: ${response.projectPath}")
+            console.log("📂 Root node path: ${response.tree?.path}")
+            if (response.tree?.children?.isNotEmpty() == true) {
+                console.log("📂 First child path: ${response.tree.children?.firstOrNull()?.path}")
+            }
             onUpdate(response.tree, response.projectPath)
         }
     } catch (e: Exception) {

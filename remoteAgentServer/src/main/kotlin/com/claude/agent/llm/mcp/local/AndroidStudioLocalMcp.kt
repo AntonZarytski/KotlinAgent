@@ -27,12 +27,12 @@ class AndroidStudioLocalMcp : Mcp.Local {
             ПРАВИЛА:
             - Файлы доступны ТОЛЬКО через этот инструмент
             - Пути относительны к корню проекта
-            - Используй read_file для чтения, browse_files для просмотра
+            - Используй read_file для чтения, write_file для записи, browse_files для просмотра
 
             ОСНОВНЫЕ ДЕЙСТВИЯ:
 
             Проект: set_project_path, get_project_path
-            Файлы: browse_files, read_file, find_files
+            Файлы: browse_files, read_file, write_file, find_files
             Сборка: gradle_build, gradle_install_run
             Эмулятор: list_emulators, start_emulator, stop_emulator
             Запуск: install_apk, run_app
@@ -42,12 +42,15 @@ class AndroidStudioLocalMcp : Mcp.Local {
             ТИПИЧНЫЙ WORKFLOW:
             1. browse_files ("") → просмотр корня проекта
             2. read_file ("AndroidManifest.xml") → узнать package_name
-            3. gradle_build → собрать APK
-            4. list_emulators → найти AVD
-            5. start_emulator (avd_name) → запустить эмулятор
-            6. gradle_install_run → установить и запустить
+            3. write_file ("path/to/file.kt", content="...") → изменить файл (автоматически создаст бэкап и diff)
+            4. gradle_build → собрать APK
+            5. list_emulators → найти AVD
+            6. start_emulator (avd_name) → запустить эмулятор
+            7. gradle_install_run → установить и запустить
 
-            ВАЖНО: Всегда читай файлы перед использованием, не предполагай содержимое.
+            ВАЖНО:
+            - Всегда читай файлы перед использованием, не предполагай содержимое
+            - write_file автоматически создает бэкап и генерирует diff для отображения изменений
             """.trimIndent(),
             enabled = true,
             input_schema = buildJsonObject {
@@ -77,6 +80,7 @@ class AndroidStudioLocalMcp : Mcp.Local {
                             add("find_files")
                             add("save_log")
                             add("read_app_log")
+                            add("write_file")
                         }
                     }
                     putJsonObject("project_path") {
@@ -173,6 +177,15 @@ class AndroidStudioLocalMcp : Mcp.Local {
                         put("type", "string")
                         put("description", "Log file name to read (default: app.log)")
                         put("default", "app.log")
+                    }
+                    putJsonObject("content") {
+                        put("type", "string")
+                        put("description", "For write_file: new content to write to the file")
+                    }
+                    putJsonObject("create_backup") {
+                        put("type", "boolean")
+                        put("description", "For write_file: create backup of original file before writing (default: true)")
+                        put("default", true)
                     }
                 }
                 putJsonArray("required") { add("action") }

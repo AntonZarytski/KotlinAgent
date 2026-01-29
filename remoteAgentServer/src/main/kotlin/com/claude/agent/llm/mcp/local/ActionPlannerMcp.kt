@@ -170,8 +170,42 @@ class ActionPlannerMcp() : Mcp.Local {
                     continue
                 }
 
+                // Для android_studio_mcp проверяем наличие параметра action
+                val finalArguments = if (toolName == "android_studio_mcp") {
+                    val hasAction = toolArguments["action"] != null
+                    if (!hasAction) {
+                        // Пытаемся определить action по наличию параметров
+                        val action = when {
+                            toolArguments["file_path"] != null -> "read_file"
+                            toolArguments["directory_path"] != null -> "browse_files"
+                            toolArguments["project_path"] != null -> "set_project_path"
+                            toolArguments["build_variant"] != null -> "gradle_build"
+                            toolArguments["avd_name"] != null -> "start_emulator"
+                            else -> null
+                        }
+
+                        if (action != null) {
+                            logger.warn("⚠️ Missing 'action' parameter for android_studio_mcp, auto-detected: $action")
+                            buildJsonObject {
+                                put("action", action)
+                                toolArguments.forEach { (key, value) ->
+                                    put(key, value)
+                                }
+                            }
+                        } else {
+                            logger.error("❌ Cannot auto-detect action for android_studio_mcp with arguments: $toolArguments")
+                            results.add("   ❌ Error: Missing required parameter: action\n")
+                            continue
+                        }
+                    } else {
+                        toolArguments
+                    }
+                } else {
+                    toolArguments
+                }
+
                 val result = tool.executeTool(
-                    arguments = toolArguments,
+                    arguments = finalArguments,
                     clientIp = clientIp,
                     userLocation = userLocation,
                     sessionId = sessionId
